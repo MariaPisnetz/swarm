@@ -28,7 +28,7 @@ function swarm(home, args, env = {}) {
     env: { ...process.env, ...GIT_ENV, NO_COLOR: '1', SWARM_HOME: path.join(tmp, home), ...env },
     encoding: 'utf8',
   });
-  return { code: r.status, out: r.stdout + r.stderr };
+  return { code: r.status, out: r.stdout + r.stderr, stdout: r.stdout };
 }
 
 const write = (file, text) => {
@@ -120,7 +120,7 @@ test('submit, independent review, merge, ledger', () => {
   assert.match(swarm('carol', ['tasks', '--repo', remote, '--json']).out, /"ref": "demo\/add-greeting",[^}]*"state": "done"/s);
   // Merging leaves no coordination refs behind.
   assert.equal(sh('git', ['for-each-ref', '--format=%(refname)', 'refs/swarm/reviews/demo/add-greeting', 'refs/swarm/claims/demo/add-greeting', 'refs/heads/swarm/demo/add-greeting'], remote).trim(), '');
-  const ledger = JSON.parse(swarm('carol', ['ledger', '--repo', remote, '--json']).out.replace(/^[^{]*/s, ''));
+  const ledger = JSON.parse(swarm('carol', ['ledger', '--repo', remote, '--json']).stdout); // --json: stdout is the document, nothing else
   assert.equal(ledger.totals.tasks, 1);
   assert.equal(ledger.workers[0].handle, 'alice');
 });
