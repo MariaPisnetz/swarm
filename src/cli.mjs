@@ -112,7 +112,8 @@ export function targets(args, config) {
 
 async function context(args, { needsIdentity = true, repoSpec } = {}) {
   const config = loadConfig();
-  const identity = needsIdentity ? needIdentity() : loadIdentity();
+  // First use on a machine makes the key; nobody should need a separate init step to donate.
+  const identity = needsIdentity ? loadIdentity() || createIdentity({ handle: await defaultHandle() }) : loadIdentity();
   const repo = resolveRepo(repoSpec || targets(args, config)[0].repo);
   if (repo.kind === 'github' && !(await which('gh'))) throw new Error('GitHub repositories need the `gh` CLI (https://cli.github.com), logged in.');
   step(`Syncing ${repo.github || repo.url}`);

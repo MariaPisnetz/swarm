@@ -1,6 +1,6 @@
 ---
 name: swarm
-description: Spend leftover Claude quota on an open-source project the user chose. Use when the user asks to set up Swarm, choose a project to donate quota to, donate leftover quota, do a Swarm task, or when a scheduled Swarm run starts.
+description: Spend leftover Claude quota on an open-source project the user chose. Use when the user asks to set up Swarm, choose a project to donate quota to, donate leftover quota, do a Swarm task, review a Swarm submission, or when a scheduled Swarm run starts.
 ---
 
 Swarm is three steps: the user installs this plugin, chooses a project, and their leftover quota
@@ -59,6 +59,14 @@ Pick the first way that this session supports.
 
 This session cannot run Swarm (a chat without tools, for example). Say so in one line and point
 the user to `references/setup.md` for where it does run.
+
+## Review someone else's submission instead
+
+When the user asks to review a Swarm submission: with the connector, call `swarm_review` (add
+`task` if they named one) and poll `swarm_job`; with a shell, run `SWARM review` (add
+`--task project/task` or the pull request number). Swarm reproduces the checks, has the local
+agent CLI read the change, and posts a signed review. It needs the `claude` or `codex` CLI on the
+machine, and it never reviews the user's own submission.
 
 ## Report
 

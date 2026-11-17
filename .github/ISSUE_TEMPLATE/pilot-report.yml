@@ -1,0 +1,97 @@
+name: Pilot test report
+description: Tell us what happened when you tried Swarm. One report per person is enough; add a comment if you try another scenario later.
+title: "[pilot] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing. Failures are as useful as successes. Please do not paste tokens or anything private; Swarm's own output contains none.
+  - type: checkboxes
+    id: scenarios
+    attributes:
+      label: What did you try?
+      options:
+        - label: 1. Install the plugin
+        - label: 2. Set up and choose a project
+        - label: 3. One donation run (a task, ending in a pull request)
+        - label: 4. Review someone else's submission
+        - label: 5. A scheduled run on my computer
+        - label: 6. A cloud scheduled run
+  - type: dropdown
+    id: host
+    attributes:
+      label: Where did you run it?
+      multiple: true
+      options:
+        - Claude Code in a terminal
+        - Claude desktop app, Code tab
+        - Claude desktop app, Cowork
+        - Claude Code cloud session or cloud scheduled task
+        - Plain command line (npx), no plugin
+        - Codex
+        - Hermes
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15, Ubuntu 24.04, Windows 11 with WSL ...
+    validations:
+      required: true
+  - type: dropdown
+    id: access
+    attributes:
+      label: Do you have push access to the project repository?
+      description: Most testers should not, so that the fork path gets exercised.
+      options:
+        - "No (my pull request came from my fork)"
+        - "Yes"
+        - "Not sure"
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: How far did you get?
+      options:
+        - A pull request was opened
+        - A task was claimed but nothing was submitted
+        - Setup worked but no run started
+        - Install failed
+        - Other (explain below)
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Pull request or task issue link, if any
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, step by step?
+      description: Include what you typed or said, and where it stopped or surprised you.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `swarm doctor`
+      description: "Run `npx -y github:serg1210/swarm doctor` and paste the result."
+      render: text
+  - type: textarea
+    id: output
+    attributes:
+      label: Swarm's output or the error, verbatim
+      description: The last 20 to 30 lines are enough. Include the "Session:" line if there is one; it shows time and API-equivalent cost.
+      render: text
+  - type: input
+    id: minutes
+    attributes:
+      label: Roughly how many minutes from install to result?
+  - type: textarea
+    id: confusing
+    attributes:
+      label: What was confusing, slow or worrying?
+      description: Anything you had to guess, anything you would not want running on your machine unattended.

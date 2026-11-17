@@ -109,21 +109,37 @@ export class GitHubBoard {
    * https gh supplies the credential, so Swarm never handles a token.
    */
   async #pushRemote(workDir) {
-    const name = this.repo.split('/')[1];
-    let owner = this.repo.split('/')[0];
-    if (!(await this.canPush())) {
-      // SWARM_FORK names the fork to push to, for sessions that cannot ask GitHub who they are.
-      owner = process.env.SWARM_FORK ? process.env.SWARM_FORK.split('/')[0] : await this.login();
-      await run('gh', ['api', '-X', 'POST', `${this.repoPath}/forks`]); // no-op when the fork exists
-    }
+    let target = this.repo; // "owner/name" to push to
+    if (!(await this.canPush())) target = await this.#fork();
     const proto = CLOUD ? 'https' : (await run('gh', ['config', 'get', 'git_protocol', '-h', 'github.com'])).stdout.trim();
-    const url = proto === 'ssh' ? `git@github.com:${owner}/${name}.git` : `https://github.com/${owner}/${name}.git`;
+    const url = proto === 'ssh' ? `git@github.com:${target}.git` : `https://github.com/${target}.git`;
     await run('git', ['remote', 'remove', 'swarm-push'], { cwd: workDir });
     await git(workDir, ['remote', 'add', 'swarm-push', url]);
     // On a laptop gh supplies the https credential. In a cloud session the GitHub proxy does,
     // and a helper of ours would only get in its way.
     if (proto !== 'ssh' && !CLOUD) await git(workDir, ['config', 'credential.https://github.com.helper', '!gh auth git-credential']);
-    return { remote: 'swarm-push', owner };
+    return { remote: 'swarm-push', owner: target.split('/')[0] };
+  }
+
+  /**
+   * The volunteer's fork, as "owner/name", created if needed.
+   * GitHub creates forks in the background and may name one differently when the name is taken,
+   * so the name comes from the API's answer and the fork is polled until it exists.
+   */
+  async #fork() {
+    if (process.env.SWARM_FORK) return process.env.SWARM_FORK; // for sessions that cannot create one
+    let fork;
+    try {
+      fork = await this.api('POST', `${this.repoPath}/forks`, {});
+    } catch (err) {
+      throw new Error(`You cannot push to ${this.repo} and creating a fork failed. Fork it on GitHub, then retry (or set SWARM_FORK=you/fork).\n${err.message}`);
+    }
+    const name = fork.full_name;
+    for (let i = 0; i < 20; i++) {
+      if ((await run('gh', ['api', `repos/${name}/git/refs/heads/${this.mirror.branch}`])).code === 0) return name;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    throw new Error(`Your fork ${name} was requested but is not ready yet. Wait a minute and run again.`);
   }
 
   /** Task issues opened by a maintainer (or by the repository's own Actions bot), by task ref. */
