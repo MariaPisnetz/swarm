@@ -15,6 +15,7 @@ import { reviewSubmission, reverify, tallyReviews } from './review.mjs';
 import { checkSubmission, readLedger } from './receipt.mjs';
 import { git, runVerify, describeFailure } from './verify.mjs';
 import { leaderboard, renderLeaderboard } from './ledger.mjs';
+import { readHistory, summarizeHistory } from './history.mjs';
 
 const PKG = readJson(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'));
 const BOOLEANS = new Set(['dry-run', 'json', 'force', 'unsafe-no-sandbox', 'help', 'include-mine', 'no-verify', 'all', 'remove']);
@@ -30,7 +31,8 @@ ${c.bold('Volunteer')}
   swarm tasks [--repo <repo>]                    list tasks and their state
   swarm run [--task <project/task>] [options]    work on a task and submit it
   swarm review [--task <project/task>]           independently verify someone else's submission
-  swarm mcp                                      run as an MCP connector (Claude Code, Cowork, Codex, Hermes)
+  swarm history [--json]                         show what you have donated so far
+  swarm mcp                                    run as an MCP connector (Claude Code, Cowork, Codex, Hermes)
 
 ${c.bold('For an agent that does the task itself')} (cloud sessions, any host with a shell; prints JSON)
   swarm task begin [--task <project/task>] [--agent <name>]   claim a task, get a clone and instructions
@@ -352,6 +354,17 @@ const commands = {
       }
     }
     log(`\n${c.bold('Session')}: ${total.submitted} submitted, ${total.failed} failed, ${fmtUsd(total.costUsd)} API-equivalent quota used.`);
+  },
+
+  async history(args) {
+    const entries = readHistory(path.join(SWARM_HOME, 'history.jsonl'));
+    const summary = summarizeHistory(entries);
+    if (args.json) return log(JSON.stringify(summary, null, 2));
+    log(`${c.bold('Donated')}: ${summary.submitted} submitted, ${summary.failed} failed, ${fmtUsd(summary.costUsd)} API-equivalent quota used.`);
+    for (const [name, r] of Object.entries(summary.byRunner)) log(c.dim(`  ${name}: ${r.submitted} submitted, ${r.failed} failed, ${fmtUsd(r.costUsd)}`));
+    if (!entries.length) return log(c.dim('Nothing yet. Try `swarm run`.'));
+    log(`\n${c.bold('Most recent')}`);
+    for (const e of entries.slice(-10).reverse()) log(`  ${String(e.ts || '').slice(0, 19)}  ${String(e.status || '?').padEnd(10)} ${e.task || ''} ${c.dim(e.repo || '')}`);
   },
 
   async sync(args) {
