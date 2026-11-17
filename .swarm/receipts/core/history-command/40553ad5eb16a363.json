@@ -1,0 +1,49 @@
+{
+  "v": 1,
+  "kind": "receipt",
+  "project": "core",
+  "task": "history-command",
+  "base": "9e5ae6492172d00334bcc75b5163ff94544535bc",
+  "work": "18d409b1523eb431aab2baca6221a0a7280e80e2",
+  "tree": "fa67df171da3e0d4ee308cd01f8c84ce02c7b746",
+  "diffSha256": "8fcc0ebfb98ce39ca7e3ebec66aad7c223f7e5d2feb92857196a9e983be46706",
+  "filesChanged": 3,
+  "linesChanged": 90,
+  "agent": {
+    "runner": "claude",
+    "model": "claude-sonnet-5-5",
+    "version": "2.1.326"
+  },
+  "usage": {
+    "inputTokens": 48390,
+    "outputTokens": 3333,
+    "costUsd": 0.1075224,
+    "turns": 9,
+    "durationMs": 20579
+  },
+  "attempts": 1,
+  "sandbox": "seatbelt",
+  "verify": [
+    {
+      "name": "unit-tests",
+      "run": "node --test test/*.test.mjs",
+      "exit": 0,
+      "ms": 9662,
+      "outputSha256": "0ce0f2cd86bd7d43a51d0212e8597ec16755146000a0799d1f223fac88f4bcb2"
+    },
+    {
+      "name": "task-1",
+      "run": "node --test .swarm/projects/core/tasks/history-command.test.mjs",
+      "exit": 0,
+      "ms": 108,
+      "outputSha256": "aa77658e9a85115502f8bafa36b33384b421e149d52d11a6d0454dc26907e1ad"
+    }
+  ],
+  "ts": "2026-11-17T21:09:29.667Z",
+  "signer": {
+    "id": "40553ad5eb16a363",
+    "handle": "serg1210",
+    "publicKey": "MCowBQYDK2VwAyEAwQ4qMVtkDJ1fGlPS9Yjqe2rUrpPnGUEVHRY2DPRQgQM="
+  },
+  "sig": "fBc9o/7ols5fW6/kQ3RQ5ckK8lDFQ7NQp+ZFHTyBczFVISSXyvBjfreIj2Mc0M2LIF7KhDrjtQGKd4Vx5SpKBQ=="
+}
