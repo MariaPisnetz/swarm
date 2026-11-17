@@ -193,10 +193,17 @@ export function setLogSink(fn) {
 export function log(msg = '') {
   sink(String(msg));
 }
-export const step = (msg) => log(`${c.cyan('›')} ${msg}`);
-export const ok = (msg) => log(`${c.green('✓')} ${msg}`);
-export const warn = (msg) => log(`${c.yellow('!')} ${msg}`);
-export const fail = (msg) => log(`${c.red('✗')} ${msg}`);
+// Progress lines can be sent somewhere other than results, so `--json` output stays parseable.
+let progressSink = null;
+export function setProgressSink(fn) {
+  progressSink = fn;
+}
+const progress = (line) => (progressSink ? progressSink(line) : log(line));
+
+export const step = (msg) => progress(`${c.cyan('›')} ${msg}`);
+export const ok = (msg) => progress(`${c.green('✓')} ${msg}`);
+export const warn = (msg) => progress(`${c.yellow('!')} ${msg}`);
+export const fail = (msg) => progress(`${c.red('✗')} ${msg}`);
 
 export function fmtUsd(n) {
   return `$${(n || 0).toFixed(2)}`;

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SWARM_HOME, readJson, writeJson, run, which, log, step, ok, warn, fail, c, fmtUsd, fmtDuration, setLogSink } from './util.mjs';
+import { SWARM_HOME, readJson, writeJson, run, which, log, step, ok, warn, fail, c, fmtUsd, fmtDuration, setLogSink, setProgressSink } from './util.mjs';
 import { createIdentity, loadIdentity, exportIdentity } from './identity.mjs';
 import { loadProjects, findTask, completedTasks } from './project.mjs';
 import { resolveRepo, syncMirror, loadProjectsAt } from './repo.mjs';
@@ -533,6 +533,8 @@ const commands = {
 export async function main(argv) {
   const args = parseArgs(argv);
   const name = args.help ? 'help' : args._.shift() || 'help';
+  // With --json, stdout carries the JSON document and nothing else.
+  if (args.json) setProgressSink((line) => process.stderr.write(line + '\n'));
   const cmd = commands[name];
   if (!cmd) {
     fail(`Unknown command "${name}".`);
