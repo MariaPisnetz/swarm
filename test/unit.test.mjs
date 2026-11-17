@@ -31,6 +31,17 @@ test('globs', () => {
   assert.ok(!matchesAny('src/cli.mjs', ALWAYS_PROTECTED));
 });
 
+test('glob braces', () => {
+  const g = globToRegExp('src/{cli,worker}.mjs');
+  assert.ok(g.test('src/cli.mjs') && g.test('src/worker.mjs'));
+  assert.ok(!g.test('src/util.mjs'));
+  assert.ok(matchesAny('docs/a/b.md', ['**/*.{md,txt}']));
+  assert.ok(!matchesAny('a.rst', ['**/*.{md,txt}']));
+  assert.ok(globToRegExp('a{b').test('a{b'));
+  assert.ok(globToRegExp('a{{b,c}').test('a{b'));
+  assert.ok(globToRegExp('a{{b,c}').test('ac'));
+});
+
 test('frontmatter', () => {
   const { meta, body } = parseFrontmatter('---\nid: a-1\ntitle: Do the thing: now\npaths: ["src/**", "test/**"]\nsize: S\n---\n\nBody here.\n');
   assert.equal(meta.id, 'a-1');

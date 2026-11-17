@@ -87,11 +87,25 @@ export async function which(bin) {
  * A pattern ending in `/` matches everything below that directory.
  */
 export function globToRegExp(glob) {
-  let g = glob.endsWith('/') ? glob + '**' : glob;
+  const g = glob.endsWith('/') ? glob + '**' : glob;
+  return new RegExp(`^${globBody(g)}$`);
+}
+
+// Converts glob text to a regex source. `{a,b}` is alternation (not nestable);
+// a `{` without a closing `}` is literal, as is a `{` nested inside a group.
+function globBody(g) {
   let re = '';
   for (let i = 0; i < g.length; i++) {
     const c = g[i];
-    if (c === '*') {
+    if (c === '{') {
+      const end = g.indexOf('}', i);
+      if (end !== -1) {
+        re += `(?:${g.slice(i + 1, end).split(',').map(globBody).join('|')})`;
+        i = end;
+      } else {
+        re += '\\{';
+      }
+    } else if (c === '*') {
       if (g[i + 1] === '*') {
         i++;
         if (g[i + 1] === '/') {
@@ -109,7 +123,7 @@ export function globToRegExp(glob) {
       re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     }
   }
-  return new RegExp(`^${re}$`);
+  return re;
 }
 
 export function matchesAny(file, globs = []) {
