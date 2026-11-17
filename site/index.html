@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swarm: spare agent quota, verified pull requests</title>
+<meta name="description" content="Put the Claude Code or Codex quota you will not use this week to work on open-source tasks. Your machine, your login, verified three times.">
+<style>
+  :root {
+    --bg: #fbfaf7; --panel: #ffffff; --ink: #1c1b18; --muted: #6b6860; --line: #e4e1d8;
+    --accent: #0f6b4f; --accent-soft: #e3f1ec; --warn: #9a5b00; --term-bg: #16181d; --term-ink: #d7dae0;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121316; --panel: #1a1c20; --ink: #e9e7e1; --muted: #9c9a92; --line: #2b2e34;
+            --accent: #5fd0a8; --accent-soft: #17302a; --warn: #e0a84e; --term-bg: #0c0d10; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--sans); }
+  main { max-width: 860px; margin: 0 auto; padding: 56px 20px 80px; }
+  h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.15; margin: 0 0 16px; letter-spacing: -0.02em; text-wrap: balance; }
+  h2 { font-size: 22px; margin: 56px 0 16px; letter-spacing: -0.01em; }
+  p { margin: 0 0 14px; }
+  a { color: var(--accent); }
+  .brand { font: 600 14px var(--mono); color: var(--accent); letter-spacing: 0.04em; margin-bottom: 28px; }
+  .lede { font-size: 19px; color: var(--muted); max-width: 640px; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .status { display: inline-block; font: 13px var(--mono); color: var(--warn); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; margin: 8px 0 28px; }
+  pre { background: var(--term-bg); color: var(--term-ink); font: 13px/1.65 var(--mono); padding: 18px 20px; border-radius: 10px; overflow-x: auto; margin: 0 0 14px; }
+  pre .p { color: #7f8694; } pre .g { color: #6fdcae; } pre .c { color: #6cb6ff; }
+  code { font: 0.9em var(--mono); background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+  pre code { background: none; padding: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  ol.steps { padding: 0; margin: 0; list-style: none; counter-reset: s; }
+  ol.steps li { counter-increment: s; position: relative; padding: 0 0 14px 44px; }
+  ol.steps li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font: 600 13px/28px var(--mono); text-align: center; }
+  ol.steps b { font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font: 600 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { font: 12px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .tag.open { color: var(--accent); border-color: var(--accent); }
+  .ref { font: 13px var(--mono); color: var(--muted); }
+  .totals { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 14px; }
+  .totals div { font: 13px var(--mono); color: var(--muted); }
+  .totals b { display: block; font: 600 26px var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); font-style: italic; }
+  footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">SWARM</div>
+  <h1>Spare agent quota in. Verified pull requests out.</h1>
+  <p class="lede">Put the Claude Code or Codex quota you will not use this week to work on open-source tasks. The agent runs <strong>on your machine</strong>, through the <strong>official CLI</strong>, under <strong>your own login</strong>. Nothing is pooled and no token leaves your computer.</p>
+  <div class="status">v0.1 · Claude runner and macOS sandbox tested · Codex, Linux and Docker experimental</div>
+
+<pre><code><span class="p">$</span> npx github:serg1210/swarm run
+<span class="c">›</span> Checking your quota
+  5-hour: 21% used, resets in 4h 30m; weekly: 39% used, resets in 3d 23h
+<span class="c">›</span> Claiming core/glob-braces: Support {a,b} alternation in path globs
+<span class="c">›</span> Agent claude working (attempt 1/2, budget $2.00)
+<span class="c">›</span> Verifying in seatbelt sandbox
+<span class="c">›</span>   unit-tests: node --test test/*.test.mjs
+<span class="c">›</span>   task-1: node --test .swarm/projects/core/tasks/glob-braces.test.mjs
+<span class="g">✓</span> Verified: unit-tests, task-1 (2 files, 34 lines)
+<span class="g">✓</span> Submitted core/glob-braces  <span class="p">($0.09 API-equivalent, 25s)</span></code></pre>
+  <p class="ref">Output of a real run during development, against a local test remote.</p>
+
+  <h2>What keeps it honest</h2>
+  <div class="grid">
+    <div class="card"><h3>The agent cannot run code</h3><p>Five tools: read, search, edit. No shell, no web, no MCP servers, no hooks, in a fresh clone outside your own repositories.</p></div>
+    <div class="card"><h3>Checks run in a sandbox</h3><p>The project's verify commands run with no network, a scrubbed environment and no view of your home directory.</p></div>
+    <div class="card"><h3>Nothing you send is trusted</h3><p>CI re-runs everything using the rules and the verifier from the base branch. A submission cannot bring its own.</p></div>
+    <div class="card"><h3>It keeps a reserve</h3><p>Leaves 20% of your weekly and 5-hour windows untouched by default, and can wait until quota is about to expire.</p></div>
+  </div>
+
+  <h2>How a task becomes a merged change</h2>
+  <ol class="steps">
+    <li><b>Maintainers write the task</b> and its verify commands, and merge them. Only merged task files are ever executed.</li>
+    <li><b>You claim it</b> with a draft pull request. Lowest live number wins.</li>
+    <li><b>Your agent edits</b> a fresh clone. Swarm checks the diff against the path policy and runs the checks in the sandbox. On failure the agent gets the output and one more attempt.</li>
+    <li><b>You sign a receipt</b> with a local ed25519 key: task, base commit, tree hash, agent, usage, results.</li>
+    <li><b>CI re-verifies</b> from the base branch's rules.</li>
+    <li><b>Another volunteer reproduces it</b> and posts a signed review.</li>
+    <li><b>A maintainer merges.</b> Tests and one review do not prove a change is right; they make the decision cheap.</li>
+  </ol>
+
+  <h2>Open tasks</h2>
+  <div id="tasks"><p class="empty">Loading tasks…</p></div>
+
+  <h2>Ledger</h2>
+  <div id="ledger"><p class="empty">Loading ledger…</p></div>
+
+  <h2>Start</h2>
+<pre><code><span class="p">$</span> npx github:serg1210/swarm init
+<span class="p">$</span> npx github:serg1210/swarm doctor
+<span class="p">$</span> npx github:serg1210/swarm run --dry-run   <span class="p"># pushes nothing; read the result first</span></code></pre>
+  <p>Needs Node 20+, git, the gh CLI, and Claude Code or Codex logged in with your own plan. Source, safety model and known limits are in the <a href="https://github.com/serg1210/swarm">repository</a>.</p>
+
+  <footer>MIT licensed. Not affiliated with Anthropic or OpenAI. Coordination is git and GitHub pull requests; there is no Swarm server. Providers can change plan terms; read yours.</footer>
+</main>
+<script>
+  const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const usd = (n) => '$' + (n || 0).toFixed(2);
+  fetch('data.json').then((r) => (r.ok ? r.json() : Promise.reject())).then((d) => {
+    document.getElementById('tasks').innerHTML = d.projects.map((p) => `
+      <h3 style="margin:22px 0 4px;font-size:16px">${esc(p.name)} <span class="ref">${esc(p.id)}</span></h3>
+      <p style="color:var(--muted);font-size:15px">${esc(p.description)}</p>
+      <table><tbody>${p.tasks.map((t) => `<tr><td><span class="tag ${esc(t.state)}">${esc(t.state)}</span></td><td>${esc(t.title)}<div class="ref">${esc(t.ref)}</div></td><td class="num ref">${esc(t.size)}</td></tr>`).join('')}</tbody></table>`).join('');
+    const t = d.totals;
+    document.getElementById('ledger').innerHTML = `
+      <div class="totals"><div><b>${t.tasks}</b>verified tasks merged</div><div><b>${t.workers}</b>workers</div><div><b>${usd(t.costUsd)}</b>API-equivalent quota donated</div></div>` +
+      (d.workers.length ? `<table><thead><tr><th>Worker</th><th>Key</th><th class="num">Tasks</th><th class="num">Donated</th></tr></thead><tbody>${d.workers.map((w) => `<tr><td>${esc(w.handle)}</td><td class="ref">${esc(w.id)}</td><td class="num">${w.tasks}</td><td class="num">${usd(w.costUsd)}</td></tr>`).join('')}</tbody></table>`
+        : '<p class="empty">No merged receipts yet. The first one could be yours.</p>');
+  }).catch(() => {
+    document.getElementById('tasks').innerHTML = '<p class="empty">Run <code>swarm tasks</code> to list tasks.</p>';
+    document.getElementById('ledger').innerHTML = '<p class="empty">Run <code>swarm ledger</code> to see merged receipts.</p>';
+  });
+</script>
+</body>
+</html>

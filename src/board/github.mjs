@@ -36,17 +36,24 @@ export class GitHubBoard {
     return ['ADMIN', 'MAINTAIN', 'WRITE'].includes(this._perm);
   }
 
-  /** Name of the git remote to push work to, creating the volunteer's fork when needed. */
+  /**
+   * Git remote to push work to: the project itself for people with push access, otherwise the
+   * volunteer's fork (created on first use). The URL follows gh's configured protocol, and over
+   * https gh supplies the credential, so Swarm never handles a token.
+   */
   async #pushRemote(workDir) {
-    if (await this.canPush()) return { remote: 'origin', owner: this.repo.split('/')[0] };
-    const me = await this.login();
     const name = this.repo.split('/')[1];
-    await run('gh', ['repo', 'fork', this.repo, '--clone=false']);
+    let owner = this.repo.split('/')[0];
+    if (!(await this.canPush())) {
+      owner = await this.login();
+      await run('gh', ['repo', 'fork', this.repo, '--clone=false']);
+    }
     const proto = (await run('gh', ['config', 'get', 'git_protocol', '-h', 'github.com'])).stdout.trim();
-    const url = proto === 'ssh' ? `git@github.com:${me}/${name}.git` : `https://github.com/${me}/${name}.git`;
-    await run('git', ['remote', 'remove', 'fork'], { cwd: workDir });
-    await git(workDir, ['remote', 'add', 'fork', url]);
-    return { remote: 'fork', owner: me };
+    const url = proto === 'ssh' ? `git@github.com:${owner}/${name}.git` : `https://github.com/${owner}/${name}.git`;
+    await run('git', ['remote', 'remove', 'swarm-push'], { cwd: workDir });
+    await git(workDir, ['remote', 'add', 'swarm-push', url]);
+    if (proto !== 'ssh') await git(workDir, ['config', 'credential.https://github.com.helper', '!gh auth git-credential']);
+    return { remote: 'swarm-push', owner };
   }
 
   async #openPrs() {
