@@ -2,9 +2,9 @@ name: pages
 
 # Publishes the project page with the task list and the ledger of merged receipts.
 
+# Manual until GitHub Pages is enabled for the repository (Settings > Pages > Source: GitHub
+# Actions). After that, add `push: { branches: [main] }` under `on:` to publish on every merge.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
