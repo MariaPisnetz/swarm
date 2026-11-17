@@ -29,6 +29,7 @@ ${c.bold('Volunteer')}
   swarm tasks [--repo <repo>]                    list tasks and their state
   swarm run [--task <project/task>] [options]    work on a task and submit it
   swarm review [--task <project/task>]           independently verify someone else's submission
+  swarm mcp                                      run as an MCP connector (Claude Code, Cowork, Codex, Hermes)
 
 ${c.bold('Maintainer')}
   swarm verify [--project <id>] [--task <id>]    run a project's verify steps on the current checkout
@@ -70,8 +71,16 @@ export function parseArgs(argv) {
   return out;
 }
 
+/** A handle that is already public: the GitHub login when gh is logged in, else "anon". */
+export async function defaultHandle() {
+  const res = await run('gh', ['api', 'user', '-q', '.login']).catch(() => ({ code: 1, stdout: '' }));
+  const login = res.code === 0 ? res.stdout.trim() : '';
+  return /^[A-Za-z0-9-]{1,39}$/.test(login) ? login : 'anon';
+}
+
 const configFile = () => path.join(SWARM_HOME, 'config.json');
-const loadConfig = () => readJson(configFile(), {});
+export const loadConfig = () => readJson(configFile(), {});
+export const saveConfig = (config) => writeJson(configFile(), config);
 
 function needIdentity() {
   const id = loadIdentity();
@@ -148,7 +157,8 @@ export function quotaDecision(rateLimit, { reserve = 0.2, onlyIfExpiringHours } 
 
 const commands = {
   async init(args) {
-    const identity = createIdentity({ handle: args.handle || os.userInfo().username });
+    // The handle is published in every receipt, so never default it to the OS account name.
+    const identity = createIdentity({ handle: args.handle || (await defaultHandle()) });
     const config = { ...loadConfig() };
     if (args.repo) config.repo = args.repo;
     if (args.runner) config.runner = args.runner;
@@ -434,6 +444,12 @@ const commands = {
       return ok(`Wrote ${args.out}`);
     }
     log(JSON.stringify(data, null, 2));
+  },
+
+  /** MCP connector over stdio. Loaded lazily: the server imports this module. */
+  async mcp() {
+    const { serve } = await import('./mcp.mjs');
+    await serve();
   },
 
   async help() {

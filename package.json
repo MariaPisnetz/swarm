@@ -1,6 +1,6 @@
 {
   "name": "swarm-at-home",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Put spare Claude Code / Codex subscription quota to work on verified open-source tasks. Your agent runs on your machine under your own login; results are sandbox-verified, signed and peer-reviewed.",
   "type": "module",
   "bin": { "swarm": "bin/swarm.mjs" },
@@ -8,7 +8,8 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "test": "node --test test/*.test.mjs gtm/test/*.test.mjs",
-    "gtm:verify": "node gtm/verify.mjs"
+    "gtm:verify": "node gtm/verify.mjs",
+    "build:plugin": "node scripts/build-plugin.mjs"
   },
   "swarm": { "defaultRepo": "serg1210/swarm" },
   "keywords": ["claude-code", "codex", "agents", "volunteer-computing", "open-source"],

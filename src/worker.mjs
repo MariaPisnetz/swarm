@@ -8,7 +8,7 @@ import { git, diffSummary, checkPolicy, runVerify, describeFailure } from './ver
 import { buildReceipt } from './receipt.mjs';
 import { makeWorkDir } from './repo.mjs';
 
-export function buildPrompt({ project, task, feedback, hints }) {
+export function buildPrompt({ project, task, feedback, hints, mode = 'cli' }) {
   const steps = verifySteps(project, task);
   const lines = [
     'You are a volunteer coding agent contributing to an open-source project through Swarm.',
@@ -21,14 +21,18 @@ export function buildPrompt({ project, task, feedback, hints }) {
     '# Rules',
     `- You may create or change only files matching: ${task.paths.join(', ')}`,
     `- Never change: ${protectedGlobs(project).join(', ')}`,
-    '- You cannot run commands. Read the code carefully instead of guessing.',
+    mode === 'connector'
+      ? '- Read and change files only through the swarm_list, swarm_read, swarm_search, swarm_write, swarm_edit and swarm_delete tools. Do not run commands and do not use any other file or shell tool on this repository.'
+      : '- You cannot run commands. Read the code carefully instead of guessing.',
     '- When you finish, an automated verifier runs these steps in a sandbox with no network access:',
     ...steps.map((s) => `    - ${s.name}: ${s.run}`),
     '  If a step fails you get its output and one more attempt.',
     '- Keep the change small and focused on the task. Follow the style of the surrounding code.',
     '- Add or update tests when you change behaviour. Do not add dependencies unless the task says so.',
-    '- If the task cannot be done as written, change nothing and explain why.',
-    '- End with a short summary of what you changed and why. It becomes the pull request description.',
+    mode === 'connector' ? '- If the task cannot be done as written, call swarm_abandon and explain why.' : '- If the task cannot be done as written, change nothing and explain why.',
+    mode === 'connector'
+      ? '- When you are done, call swarm_finish with a short summary of what you changed and why. It becomes the pull request description. If it reports a failure, fix the problem and call it again.'
+      : '- End with a short summary of what you changed and why. It becomes the pull request description.',
   ];
   const failures = Object.entries(hints?.failures || {});
   if (failures.length) {
@@ -61,7 +65,21 @@ export function openTasks(projects, mirrorDir, claims, { projectId, taskRef, unp
   return open;
 }
 
-function record(entry) {
+/** Commit the verified change, then commit a signed receipt for it. Returns the receipt. */
+export async function sealWork({ workDir, project, task, base, diff, agent, usage, verify, sandbox, attempts, identity }) {
+  await git(workDir, ['commit', '--quiet', '-m', `${task.title}\n\nSwarm-Task: ${task.ref}\nSwarm-Worker: ${identity.id}`]);
+  const work = (await git(workDir, ['rev-parse', 'HEAD'])).trim();
+  const tree = (await git(workDir, ['rev-parse', 'HEAD^{tree}'])).trim();
+  const receipt = buildReceipt({ project, task, base, work, tree, diff, agent, usage, verify, sandbox, attempts, identity });
+  const file = receiptPath(project.id, task.id, identity.id);
+  ensureDir(path.dirname(path.join(workDir, file)));
+  fs.writeFileSync(path.join(workDir, file), JSON.stringify(receipt, null, 2) + '\n');
+  await git(workDir, ['add', '-f', file]);
+  await git(workDir, ['commit', '--quiet', '-m', `swarm: receipt for ${task.ref}`]);
+  return receipt;
+}
+
+export function record(entry) {
   ensureDir(SWARM_HOME);
   fs.appendFileSync(path.join(SWARM_HOME, 'history.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
 }
@@ -146,15 +164,7 @@ export async function workOn({ repo, mirror, board, identity, runner, project, t
     }
 
     ok(`Verified: ${verify.results.map((r) => r.name).join(', ')} (${diff.files.length} files, ${diff.lines} lines)`);
-    await git(workDir, ['commit', '--quiet', '-m', `${task.title}\n\nSwarm-Task: ${task.ref}\nSwarm-Worker: ${identity.id}`]);
-    const work = (await git(workDir, ['rev-parse', 'HEAD'])).trim();
-    const tree = (await git(workDir, ['rev-parse', 'HEAD^{tree}'])).trim();
-    const receipt = buildReceipt({ project, task, base: mirror.base, work, tree, diff, agent: agentInfo, usage, verify, sandbox: opts.sandbox, attempts: Math.min(attempts, opts.attempts), identity });
-    const file = receiptPath(project.id, task.id, identity.id);
-    ensureDir(path.dirname(path.join(workDir, file)));
-    fs.writeFileSync(path.join(workDir, file), JSON.stringify(receipt, null, 2) + '\n');
-    await git(workDir, ['add', '-f', file]);
-    await git(workDir, ['commit', '--quiet', '-m', `swarm: receipt for ${task.ref}`]);
+    const receipt = await sealWork({ workDir, project, task, base: mirror.base, diff, agent: agentInfo, usage, verify, sandbox: opts.sandbox, attempts: Math.min(attempts, opts.attempts), identity });
 
     if (opts.dryRun) {
       ok(`Dry run: nothing pushed. Result is in ${workDir}`);

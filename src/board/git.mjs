@@ -49,7 +49,7 @@ export class GitBoard {
     for (const { ref, sha, doc } of await this.#readDocs(CLAIMS)) {
       if (new Date(doc.exp) < new Date()) continue;
       const list = live.get(doc.task) || [];
-      list.push({ worker: doc.worker, exp: doc.exp, ref, sha, mine: doc.worker === this.identity.id });
+      list.push({ worker: doc.worker, exp: doc.exp, ref, sha, mine: doc.worker === this.identity?.id });
       live.set(doc.task, list);
     }
     for (const s of await this.submissions()) {
@@ -96,7 +96,7 @@ export class GitBoard {
         const [head, ref] = line.split('\t');
         const branch = ref.replace('refs/heads/', '');
         const [, project, task, worker] = branch.split('/');
-        return { id: branch, taskRef: `${project}/${task}`, worker, head, mine: this.identity.id.startsWith(worker) };
+        return { id: branch, taskRef: `${project}/${task}`, worker, head, mine: Boolean(this.identity?.id.startsWith(worker)) };
       });
   }
 

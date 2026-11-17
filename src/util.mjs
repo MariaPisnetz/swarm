@@ -181,8 +181,17 @@ export const c = {
   cyan: paint('36'),
 };
 
+let sink = (line) => process.stdout.write(line + '\n');
+
+/** Redirect all progress output. Returns the previous sink so it can be restored. */
+export function setLogSink(fn) {
+  const prev = sink;
+  sink = fn;
+  return prev;
+}
+
 export function log(msg = '') {
-  process.stdout.write(msg + '\n');
+  sink(String(msg));
 }
 export const step = (msg) => log(`${c.cyan('›')} ${msg}`);
 export const ok = (msg) => log(`${c.green('✓')} ${msg}`);

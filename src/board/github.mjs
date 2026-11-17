@@ -172,12 +172,12 @@ export class GitHubBoard {
         }
         const r = this.#resolve(project, task, issue);
         this.failures.set(task.ref, r.failures);
-        if (r.live.length) live.set(task.ref, r.live.map((c) => ({ ...c, mine: c.worker === this.identity.id })));
+        if (r.live.length) live.set(task.ref, r.live.map((c) => ({ ...c, mine: c.worker === this.identity?.id })));
       }
     }
     for (const pr of await this.#openPrs()) {
       const list = (live.get(pr.taskRef) || []).filter((c) => c.worker !== pr.worker);
-      list.push({ worker: pr.worker, number: pr.number, submitted: true, mine: pr.worker === this.identity.id });
+      list.push({ worker: pr.worker, number: pr.number, submitted: true, mine: pr.worker === this.identity?.id });
       live.set(pr.taskRef, list);
     }
     return live;
@@ -251,7 +251,7 @@ export class GitHubBoard {
   }
 
   async submissions() {
-    return (await this.#openPrs()).map((pr) => ({ id: pr.number, taskRef: pr.taskRef, worker: pr.worker, head: pr.headRefOid, url: pr.url, mine: pr.worker === this.identity.id }));
+    return (await this.#openPrs()).map((pr) => ({ id: pr.number, taskRef: pr.taskRef, worker: pr.worker, head: pr.headRefOid, url: pr.url, mine: pr.worker === this.identity?.id }));
   }
 
   async fetchSubmission(sub) {

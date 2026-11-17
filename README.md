@@ -59,6 +59,24 @@ npx github:serg1210/swarm run --dry-run
 `--dry-run` does everything locally and pushes nothing, so you can read the result first. Drop it
 to submit. `swarm review` verifies someone else's submission instead of writing one.
 
+## Install it in your agent
+
+Swarm is also an MCP connector, so the agent you already use can run it, including on a daily
+schedule. [docs/INSTALL.md](docs/INSTALL.md) has the steps for each host.
+
+| Host | Install | Daily run |
+|---|---|---|
+| Claude Code | `/plugin marketplace add serg1210/swarm`, then `/plugin install swarm@swarm-at-home` | `/swarm:swarm-schedule` |
+| Claude desktop app (Cowork) | Customize > Plugins > Add marketplace > `serg1210/swarm` | a local scheduled task; cloud tasks cannot reach a local connector |
+| Codex | `codex mcp add swarm -- swarm mcp` | cron with `codex exec` |
+| Hermes | `mcp_servers.swarm` in `~/.hermes/config.yaml` | `hermes cron create` |
+
+If the official Claude Code or Codex CLI is on the machine, the connector starts it boxed in as
+usual. If not, your agent does the task itself through file tools that reach only the task's
+fresh clone and only the paths the task allows. Either way Swarm claims, verifies in the sandbox,
+signs and opens the pull request. Tested in Claude Code; Cowork, Codex and Hermes installs are
+written from their documentation and not yet exercised.
+
 ## How it works
 
 ```
@@ -188,6 +206,7 @@ check on your default branch and allow merge commits. Run `swarm sync` after mer
 | `swarm tasks` | list tasks and their state |
 | `swarm run` | work on a task (`--task`, `--project`, `--max-tasks`, `--dry-run`) |
 | `swarm review` | independently verify a submission |
+| `swarm mcp` | run as an MCP connector for Claude Code, Cowork, Codex or Hermes |
 | `swarm sync` | maintainers: open a log issue for each new task, close finished ones |
 | `swarm merge <id>` | maintainers: re-verify, check quorum, merge |
 | `swarm verify` | maintainers: run verify steps on the current checkout |
@@ -203,6 +222,9 @@ check on your default branch and allow merge commits. Run `swarm sync` after mer
 - **The Codex runner is experimental**, and Swarm cannot yet read Codex quota windows.
 - **The agent cannot run code.** That is deliberate, and it makes hard tasks harder. Tasks need to
   be written so they can be finished by reading.
+- **Connector mode trusts your host.** When your own agent does the task through the connector,
+  Swarm confines its file tools, not the agent. It also cannot see that host's quota, and the
+  model named in the receipt is self-reported.
 - **Sybil resistance is thin.** Worker identity is a local key. Someone can keep re-claiming a task
   to block it until the claim lapses. Reputation is future work.
 - **Workers share very little context.** Only the name of the verify step that stopped earlier

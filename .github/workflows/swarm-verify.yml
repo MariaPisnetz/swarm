@@ -56,3 +56,9 @@ jobs:
         if: github.event_name == 'push'
         working-directory: base
         run: node bin/swarm.mjs verify --unsafe-no-sandbox
+
+      - name: Plugin snapshot freshness (informational)
+        if: github.event_name == 'push'
+        working-directory: base
+        continue-on-error: true
+        run: node scripts/build-plugin.mjs --check

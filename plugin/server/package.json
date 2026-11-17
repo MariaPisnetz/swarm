@@ -1,0 +1,10 @@
+{
+  "name": "swarm-at-home",
+  "version": "0.2.0",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "swarm": {
+    "defaultRepo": "serg1210/swarm"
+  }
+}

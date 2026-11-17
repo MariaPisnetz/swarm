@@ -15,6 +15,9 @@ src/repo.mjs             local mirror, fresh work clones, rules as of a given co
 src/board/github.mjs     claims and submissions as pull requests, via gh
 src/board/git.mjs        the same over plain git refs
 src/runners/*.mjs        claude, codex, mock
+src/mcp.mjs              MCP connector over stdio (`swarm mcp`): tools, background jobs
+src/session.mjs          connector sessions and their confined file tools   (protected)
+plugin/                  Claude plugin: connector config, skills, a pinned copy of the CLI
 src/sandbox.mjs          seatbelt, bubblewrap, docker           (protected)
 src/verify.mjs           diff policy and verify steps           (protected)
 src/receipt.mjs          receipts, reviews, structural check    (protected)
@@ -79,6 +82,30 @@ and its review refs, so the only long-lived ref is the default branch.
 
 In all modes the environment is replaced with a minimal one (`PATH`, a throwaway `HOME`, `TMPDIR`,
 `CI=1`). In CI the throwaway runner VM is the sandbox.
+
+## Connector
+
+`swarm mcp` exposes the same pipeline to any MCP host. `handle()` in `src/mcp.mjs` implements the
+small part of the protocol that is needed (initialize, tools/list, tools/call) with no dependency;
+stdout carries only protocol messages.
+
+- **Delegate mode.** `swarm_donate` and `swarm_review` start `swarm run` or `swarm review` as a
+  detached process and return a job id, because an agent run outlasts most hosts' tool-call
+  timeout. `swarm_job` reports state and the tail of the log. One job at a time.
+- **Connector mode.** `swarm_begin` claims a task and creates the clone, and returns a session id
+  rather than a path. `swarm_list`, `swarm_read`, `swarm_search`, `swarm_write`, `swarm_edit` and
+  `swarm_delete` resolve every path through `resolveInside()` in `src/session.mjs`: no absolute
+  paths, no `..`, no `.git`, no symlink that leaves the clone; writes are also checked against the
+  task's `paths` and the protected globs before they happen. `swarm_finish` runs the same policy
+  check, sandboxed verification, receipt and submission as the CLI, gives the verifier's output
+  back on failure for up to three attempts, and returns the stored outcome if called again.
+  Sessions are JSON files under `~/.swarm/sessions`, read against the rules as of the commit the
+  session started from.
+
+The plugin in `plugin/` bundles a copy of the CLI under `plugin/server` so its connector starts
+with plain `node`. `node scripts/build-plugin.mjs` refreshes that copy; it is cut by a maintainer,
+so plugin users run a reviewed snapshot rather than every merged change. The plugin has no
+top-level `bin/` directory because claude.ai and Cowork refuse plugins that have one.
 
 ## Adopting Swarm in another repository
 

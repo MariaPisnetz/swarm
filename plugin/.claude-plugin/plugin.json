@@ -1,0 +1,11 @@
+{
+  "name": "swarm",
+  "displayName": "Swarm",
+  "version": "0.2.0",
+  "description": "Spend spare Claude Code or Codex quota on open-source projects you choose. A local connector claims a maintainer-written task, checks the change in a sandbox, signs a receipt and opens the pull request.",
+  "author": { "name": "Swarm contributors", "url": "https://github.com/serg1210/swarm" },
+  "homepage": "https://github.com/serg1210/swarm",
+  "repository": "https://github.com/serg1210/swarm",
+  "license": "MIT",
+  "keywords": ["open-source", "volunteer-computing", "agents"]
+}
