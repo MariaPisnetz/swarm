@@ -57,7 +57,7 @@
 <main>
   <div class="brand">SWARM</div>
   <h1>Spare agent quota in. Verified pull requests out.</h1>
-  <p class="lede">Put the Claude Code or Codex quota you will not use this week to work on open-source tasks. The agent runs <strong>on your machine</strong>, through the <strong>official CLI</strong>, under <strong>your own login</strong>. Nothing is pooled and no token leaves your computer.</p>
+  <p class="lede">Spend the Claude Code or Codex quota you will not use this week on open-source projects <strong>you choose</strong>. The agent runs <strong>on your machine</strong>, through the <strong>official CLI</strong>, under <strong>your own login</strong>. Nothing is pooled and no token leaves your computer.</p>
   <div class="status">v0.1 · Claude runner and macOS sandbox tested · Codex, Linux and Docker experimental</div>
 
 <pre><code><span class="p">$</span> npx github:serg1210/swarm run
@@ -76,6 +76,7 @@
   <div class="grid">
     <div class="card"><h3>The agent cannot run code</h3><p>Five tools: read, search, edit. No shell, no web, no MCP servers, no hooks, in a fresh clone outside your own repositories.</p></div>
     <div class="card"><h3>Checks run in a sandbox</h3><p>The project's verify commands run with no network, a scrubbed environment and no view of your home directory.</p></div>
+    <div class="card"><h3>Pull requests only for passing work</h3><p>Claims and failed attempts are comments on one issue per task. A pull request is opened after verification passed locally.</p></div>
     <div class="card"><h3>Nothing you send is trusted</h3><p>CI re-runs everything using the rules and the verifier from the base branch. A submission cannot bring its own.</p></div>
     <div class="card"><h3>It keeps a reserve</h3><p>Leaves 20% of your weekly and 5-hour windows untouched by default, and can wait until quota is about to expire.</p></div>
   </div>
@@ -83,9 +84,9 @@
   <h2>How a task becomes a merged change</h2>
   <ol class="steps">
     <li><b>Maintainers write the task</b> and its verify commands, and merge them. Only merged task files are ever executed.</li>
-    <li><b>You claim it</b> with a draft pull request. Lowest live number wins.</li>
+    <li><b>You claim it</b> with a signed comment on the task's log issue. Earliest live claim wins. No pull request yet.</li>
     <li><b>Your agent edits</b> a fresh clone. Swarm checks the diff against the path policy and runs the checks in the sandbox. On failure the agent gets the output and one more attempt.</li>
-    <li><b>You sign a receipt</b> with a local ed25519 key: task, base commit, tree hash, agent, usage, results.</li>
+    <li><b>You sign a receipt</b> with a local ed25519 key: task, base commit, tree hash, agent, usage, results. Only now is a pull request opened.</li>
     <li><b>CI re-verifies</b> from the base branch's rules.</li>
     <li><b>Another volunteer reproduces it</b> and posts a signed review.</li>
     <li><b>A maintainer merges.</b> Tests and one review do not prove a change is right; they make the decision cheap.</li>

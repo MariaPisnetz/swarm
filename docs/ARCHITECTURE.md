@@ -50,14 +50,20 @@ close them, and the ledger is the set of merged receipts.
 
 ## Claims
 
-**GitHub.** A claim is a draft pull request titled `[swarm] <project>/<task>: ...` holding one
-empty commit. After opening it the worker lists open Swarm pull requests; if an earlier live one
-exists for the same task it closes its own. Drafts older than the project's `claimTtlMinutes` are
-ignored. Volunteers without push access work from a fork.
+**GitHub.** Pull requests are costly for maintainers, so everything before a verified result
+happens on one issue per task, opened by a maintainer with `swarm sync` (issues opened by anyone
+else are ignored). A claim is a comment carrying a signed document. `resolveClaims()` in
+`src/board/github.mjs` replays the comments oldest first: the earliest live claim wins, the expiry
+clock is GitHub's comment timestamp rather than anything the worker wrote, and a worker can release
+only its own claim. A release may name the verify step that failed; only names that match the
+project's own step names are kept, and those counts are the one thing passed into later workers'
+prompts. A pull request is opened at submission, after local verification passed. Volunteers
+without push access push to a fork.
 
 **Plain git.** A claim is `refs/swarm/claims/<project>/<task>`, created with
 `git push --force-with-lease=<ref>:` (the ref must not exist) or swapped with the expired claim's
-hash as the lease. The remote decides the winner atomically.
+hash as the lease. The remote decides the winner atomically. Merging deletes the submission branch
+and its review refs, so the only long-lived ref is the default branch.
 
 ## Sandbox
 

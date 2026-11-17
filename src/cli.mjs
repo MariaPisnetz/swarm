@@ -17,7 +17,7 @@ import { git, runVerify, describeFailure } from './verify.mjs';
 import { leaderboard, renderLeaderboard } from './ledger.mjs';
 
 const PKG = readJson(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'));
-const BOOLEANS = new Set(['dry-run', 'json', 'force', 'unsafe-no-sandbox', 'help', 'include-mine', 'no-verify', 'all']);
+const BOOLEANS = new Set(['dry-run', 'json', 'force', 'unsafe-no-sandbox', 'help', 'include-mine', 'no-verify', 'all', 'remove']);
 
 const HELP = `${c.bold('swarm')} ${PKG.version}: put spare Claude Code / Codex quota to work on verified open-source tasks
 
@@ -25,18 +25,20 @@ ${c.bold('Volunteer')}
   swarm init [--handle <name>] [--repo <repo>]   create your local identity
   swarm doctor                                   check tools, login and sandbox
   swarm quota                                    show your current rate-limit windows
+  swarm choose <repo>[#project]                  pick a project to donate to (--remove to drop it)
   swarm tasks [--repo <repo>]                    list tasks and their state
   swarm run [--task <project/task>] [options]    work on a task and submit it
   swarm review [--task <project/task>]           independently verify someone else's submission
 
 ${c.bold('Maintainer')}
   swarm verify [--project <id>] [--task <id>]    run a project's verify steps on the current checkout
+  swarm sync                                     open a log issue for each new task, close finished ones
   swarm merge <submission>                       re-verify, check review quorum, merge
   swarm ledger [--json]                          leaderboard from merged receipts
   swarm ci --base <sha>                          verification entry point for CI
 
 ${c.bold('Options for run / review')}
-  --repo <owner/name | url | path>   project repository (default: ${PKG.swarm.defaultRepo})
+  --repo <owner/name | url | path>   project repository (default: the projects you chose, else ${PKG.swarm.defaultRepo})
   --project <id>                     only tasks from this project
   --runner <claude|codex|mock>       agent CLI to use (default: first one installed)
   --model <name>                     model passed to the agent CLI
@@ -77,10 +79,23 @@ function needIdentity() {
   return id;
 }
 
-async function context(args, { needsIdentity = true } = {}) {
+/**
+ * The projects this volunteer donates to, as [{ repo, project }]. An explicit --repo wins;
+ * otherwise the list built with `swarm choose`; otherwise the default repository.
+ */
+export function targets(args, config) {
+  if (args.repo || process.env.SWARM_REPO) return [{ repo: args.repo || process.env.SWARM_REPO, project: args.project }];
+  const chosen = (config.chosen || []).map((c) => {
+    const [repo, project] = c.split('#');
+    return { repo, project: args.project || project };
+  });
+  return chosen.length ? chosen : [{ repo: config.repo || PKG.swarm.defaultRepo, project: args.project }];
+}
+
+async function context(args, { needsIdentity = true, repoSpec } = {}) {
   const config = loadConfig();
   const identity = needsIdentity ? needIdentity() : loadIdentity();
-  const repo = resolveRepo(args.repo || process.env.SWARM_REPO || config.repo || PKG.swarm.defaultRepo);
+  const repo = resolveRepo(repoSpec || targets(args, config)[0].repo);
   if (repo.kind === 'github' && !(await which('gh'))) throw new Error('GitHub repositories need the `gh` CLI (https://cli.github.com), logged in.');
   step(`Syncing ${repo.github || repo.url}`);
   const mirror = await syncMirror(repo);
@@ -183,20 +198,41 @@ const commands = {
     log(d.go ? c.green('→ Room to donate.') : c.yellow(`→ Not donating now: ${d.reason}.`));
   },
 
-  async tasks(args) {
-    const { mirror, board } = await context(args, { needsIdentity: false });
-    const claims = await board.claims(mirror.projects);
-    const rows = openTasks(mirror.projects, mirror.dir, claims, { projectId: args.project });
-    if (args.json) return log(JSON.stringify(rows.map((r) => ({ ref: r.task.ref, title: r.task.title, size: r.task.size, state: r.state })), null, 2));
-    for (const project of mirror.projects) {
-      if (args.project && project.id !== args.project) continue;
-      log(`\n${c.bold(project.name || project.id)} ${c.dim(`(${project.id})`)}  ${project.description || ''}`);
-      for (const r of rows.filter((x) => x.project.id === project.id)) {
-        const tag = { open: c.green('open   '), claimed: c.yellow('claimed'), done: c.dim('done   ') }[r.state] || c.dim(r.state.padEnd(7));
-        log(`  ${tag} ${r.task.ref.padEnd(34)} ${c.dim(`[${r.task.size}]`)} ${r.task.title}`);
-      }
+  async choose(args) {
+    const config = loadConfig();
+    const chosen = new Set(config.chosen || []);
+    const spec = args._[0];
+    if (spec) {
+      resolveRepo(spec.split('#')[0]); // validates the form
+      if (args.remove) chosen.delete(spec);
+      else chosen.add(spec);
+      writeJson(configFile(), { ...config, chosen: [...chosen] });
     }
-    log();
+    if (!chosen.size) return log(`No projects chosen yet. Your quota goes to ${c.bold(PKG.swarm.defaultRepo)} by default.\nAdd one with: swarm choose <owner/name>[#project]`);
+    log(c.bold('Your quota goes to:'));
+    for (const x of chosen) log(`  ${x}`);
+  },
+
+  async tasks(args) {
+    const all = [];
+    for (const target of targets(args, loadConfig())) {
+      const { mirror, board, repo } = await context(args, { needsIdentity: false, repoSpec: target.repo });
+      const claims = await board.claims(mirror.projects);
+      const rows = openTasks(mirror.projects, mirror.dir, claims, { projectId: target.project, unpublished: board.unpublished });
+      all.push(...rows.map((r) => ({ repo: repo.github || repo.url, ref: r.task.ref, title: r.task.title, size: r.task.size, state: r.state })));
+      if (args.json) continue;
+      for (const project of mirror.projects) {
+        if (target.project && project.id !== target.project) continue;
+        log(`\n${c.bold(project.name || project.id)} ${c.dim(`(${project.id})`)}  ${project.description || ''}`);
+        for (const r of rows.filter((x) => x.project.id === project.id)) {
+          const tag = { open: c.green('open       '), claimed: c.yellow('claimed    '), done: c.dim('done       '), unpublished: c.dim('unpublished') }[r.state] || c.dim(r.state.padEnd(11));
+          log(`  ${tag} ${r.task.ref.padEnd(30)} ${c.dim(`[${r.task.size}]`)} ${r.task.title}`);
+        }
+      }
+      if (rows.some((r) => r.state === 'unpublished')) log(c.dim('\n  unpublished: the task file is merged but has no log issue yet. A maintainer runs `swarm sync`.'));
+    }
+    if (args.json) log(JSON.stringify(all, null, 2));
+    else log();
   },
 
   async run(args) {
@@ -216,29 +252,51 @@ const commands = {
 
     const maxTasks = Number(args['max-tasks'] ?? 1);
     const total = { submitted: 0, failed: 0, costUsd: 0 };
-    for (let n = 0; n < maxTasks; n++) {
-      const claims = await ctx.board.claims(ctx.mirror.projects);
-      const candidates = openTasks(ctx.mirror.projects, ctx.mirror.dir, claims, { projectId: args.project, taskRef: args.task }).filter((r) => r.state === 'open');
-      if (!candidates.length) {
-        warn(args.task ? `Task ${args.task} is not open.` : 'No open tasks right now.');
-        break;
-      }
-      const pick = candidates[Math.floor(Math.random() * candidates.length)];
-      const opts = await runOptions(args, ctx.config, pick.project);
-      const res = await workOn({ ...ctx, runner, project: pick.project, task: pick.task, opts });
-      total.costUsd += res.usage?.costUsd || 0;
-      if (res.status === 'submitted' || res.status === 'dry-run') total.submitted++;
-      else if (res.status === 'failed') total.failed++;
-      if (args.task) break;
-      if (!args.force && res.rateLimit) {
-        const d = guard(res.rateLimit);
-        if (!d.go) {
-          warn(`Stopping: ${d.reason}.`);
+    // Spread work over the chosen projects: start somewhere random, then go round.
+    const list = targets(args, ctx.config);
+    const start = Math.floor(Math.random() * list.length);
+    let stop = false;
+    for (let i = 0; i < list.length && !stop && total.submitted + total.failed < maxTasks; i++) {
+      const target = list[(start + i) % list.length];
+      const here = i === 0 && list.length === 1 ? ctx : await context(args, { repoSpec: target.repo });
+      while (total.submitted + total.failed < maxTasks) {
+        const claims = await here.board.claims(here.mirror.projects);
+        const candidates = openTasks(here.mirror.projects, here.mirror.dir, claims, { projectId: target.project, taskRef: args.task, unpublished: here.board.unpublished }).filter((r) => r.state === 'open');
+        if (!candidates.length) {
+          warn(args.task ? `Task ${args.task} is not open in ${target.repo}.` : `No open tasks in ${target.repo} right now.`);
           break;
+        }
+        const pick = candidates[Math.floor(Math.random() * candidates.length)];
+        const opts = await runOptions(args, here.config, pick.project);
+        const res = await workOn({ ...here, runner, project: pick.project, task: pick.task, opts });
+        total.costUsd += res.usage?.costUsd || 0;
+        if (res.status === 'submitted' || res.status === 'dry-run') total.submitted++;
+        else if (res.status === 'failed') total.failed++;
+        if (args.task) {
+          stop = true;
+          break;
+        }
+        if (!args.force && res.rateLimit) {
+          const d = guard(res.rateLimit);
+          if (!d.go) {
+            warn(`Stopping: ${d.reason}.`);
+            stop = true;
+            break;
+          }
         }
       }
     }
     log(`\n${c.bold('Session')}: ${total.submitted} submitted, ${total.failed} failed, ${fmtUsd(total.costUsd)} API-equivalent quota used.`);
+  },
+
+  async sync(args) {
+    const ctx = await context(args);
+    if (ctx.board.kind !== 'github') return ok('Nothing to sync: on a plain git remote every merged task file is claimable as is.');
+    const done = new Map(ctx.mirror.projects.map((p) => [p.id, completedTasks(ctx.mirror.dir, p.id)]));
+    const res = await ctx.board.sync(ctx.mirror.projects, done);
+    for (const o of res.opened) ok(`Opened log issue for ${o.ref} → ${o.url}`);
+    for (const x of res.closed) ok(`Closed log issue for ${x.ref}`);
+    if (!res.opened.length && !res.closed.length) ok('Task issues are up to date.');
   },
 
   async review(args) {
@@ -311,11 +369,7 @@ const commands = {
     const base = (await git(cwd, ['merge-base', args.base, 'HEAD'])).trim();
     const projects = await loadProjectsAt(cwd, base);
     const isSwarm = /^\[swarm\] /.test(args.title || '');
-    const commits = (await git(cwd, ['rev-list', `${base}..HEAD`])).split('\n').filter(Boolean);
 
-    if (isSwarm && commits.length === 1 && !(await git(cwd, ['diff', '--name-only', base, 'HEAD'])).trim()) {
-      return ok('Claim only (one empty commit). Nothing to verify yet.');
-    }
     if (!isSwarm) {
       // Ordinary pull request from a human: run every project's verify steps on the head.
       step('Not a swarm submission: running project verify steps on the head commit');

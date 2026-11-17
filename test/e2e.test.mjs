@@ -118,9 +118,18 @@ test('submit, independent review, merge, ledger', () => {
   assert.match(files, /src\/greet\.mjs/);
   assert.match(files, /\.swarm\/receipts\/demo\/add-greeting\/[0-9a-f]{16}\.json/);
   assert.match(swarm('carol', ['tasks', '--repo', remote, '--json']).out, /"ref": "demo\/add-greeting",[^}]*"state": "done"/s);
+  // Merging leaves no coordination refs behind.
+  assert.equal(sh('git', ['for-each-ref', '--format=%(refname)', 'refs/swarm/reviews/demo/add-greeting', 'refs/swarm/claims/demo/add-greeting', 'refs/heads/swarm/demo/add-greeting'], remote).trim(), '');
   const ledger = JSON.parse(swarm('carol', ['ledger', '--repo', remote, '--json']).out.replace(/^[^{]*/s, ''));
   assert.equal(ledger.totals.tasks, 1);
   assert.equal(ledger.workers[0].handle, 'alice');
+});
+
+test('choosing projects', () => {
+  assert.match(swarm('carol', ['choose']).out, /No projects chosen yet/);
+  assert.match(swarm('carol', ['choose', `${remote}#demo`]).out, /Your quota goes to:/);
+  assert.match(swarm('carol', ['tasks', '--json']).out, /"ref": "demo\/add-greeting"/);
+  assert.match(swarm('carol', ['choose', `${remote}#demo`, '--remove']).out, /No projects chosen yet/);
 });
 
 test('a tampered submission is rejected by the structural check', () => {

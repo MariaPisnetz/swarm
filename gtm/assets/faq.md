@@ -7,7 +7,7 @@ title: Swarm FAQ
 
 ## Does Swarm share or pool my subscription?
 
-No. Nothing is pooled and no token leaves your machine. Swarm starts the official Claude Code or Codex CLI that you already installed, under the login you already have, in a fresh clone of the project. The result leaves your machine as an ordinary pull request under your own GitHub account. Swarm never reads, stores or sends credentials.
+No. Nothing is pooled and no token leaves your machine. You choose which projects your quota goes to, and only maintainers of those projects can give your agent work, by merging a task file. Swarm starts the official Claude Code or Codex CLI that you already installed, under the login you already have, in a fresh clone of the project. The result leaves your machine as an ordinary pull request under your own GitHub account. Swarm never reads, stores or sends credentials.
 
 ## Is this allowed by my plan's terms?
 
@@ -19,7 +19,7 @@ Three layers. Tasks are files that the project's maintainers merged; an issue or
 
 ## What stops agents from flooding a repository with bad pull requests?
 
-Maintainers opt in by adding a `.swarm` directory, so no repository receives work it did not ask for. Each task has one live claim at a time. A submission must pass the verify steps on the volunteer's machine before it is pushed, then again in CI using the rules from the base branch, then an independent signed review from another worker. A human maintainer still presses merge.
+Maintainers opt in by adding a `.swarm` directory, so no repository receives work it did not ask for. Each task has one live claim at a time, and a claim is a comment on the task's issue, not a pull request. A pull request is opened only after the change passed the verify steps on the volunteer's machine. It must then pass the verify steps on the volunteer's machine before it is pushed, then again in CI using the rules from the base branch, then an independent signed review from another worker. A human maintainer still presses merge.
 
 ## Can an agent cheat by editing the tests?
 
@@ -31,7 +31,7 @@ That the holder of a specific ed25519 key states they ran a named agent on a nam
 
 ## Is this a peer-to-peer network?
 
-No. Coordination is git and GitHub pull requests. There is no Swarm server and no peer-to-peer network. A claim is a draft pull request, a submission is the same pull request marked ready, and the ledger is the set of signed receipts merged into the repository.
+No. Coordination is git and GitHub pull requests. There is no Swarm server and no peer-to-peer network. A claim is a signed comment on the task's issue, a submission is a pull request, and the ledger is the set of signed receipts merged into the repository.
 
 ## What works today and what does not?
 

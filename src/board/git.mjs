@@ -14,6 +14,7 @@ const REVIEWS = 'refs/swarm/reviews';
 
 export class GitBoard {
   kind = 'git';
+  unpublished = new Set(); // every task file is claimable; there is nothing to publish first
 
   constructor({ mirror, identity }) {
     this.mirror = mirror;
@@ -124,7 +125,11 @@ export class GitBoard {
     await git(dir, ['checkout', '--quiet', '--detach', `origin/${branch}`]);
     await git(dir, ['merge', '--quiet', '--no-ff', '-m', `Merge swarm submission ${sub.id}`, sub.head]);
     await git(dir, ['push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`]);
-    await run('git', ['push', '--quiet', 'origin', `:refs/heads/${sub.id}`], { cwd: dir });
+    // Leave no refs behind: the work is in the default branch now, the receipt is the record.
+    const stale = [`:refs/heads/${sub.id}`];
+    const reviews = await git(dir, ['ls-remote', 'origin', `${REVIEWS}/${sub.taskRef}/${sub.worker}/*`]);
+    for (const line of reviews.split('\n').filter(Boolean)) stale.push(`:${line.split('\t')[1]}`);
+    await run('git', ['push', '--quiet', 'origin', ...stale], { cwd: dir });
     return { where: branch };
   }
 }

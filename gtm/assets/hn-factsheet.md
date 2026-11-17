@@ -11,14 +11,14 @@ Use this when writing a launch post. Write the post yourself: Hacker News asks t
 
 - A command-line tool that spends spare Claude Code or Codex plan quota on open-source tasks.
 - The agent runs on the volunteer's machine, through the official CLI, under the volunteer's own login. No token leaves the machine.
-- Projects opt in by adding a `.swarm` directory with tasks and verify commands.
+- Projects opt in by adding a `.swarm` directory with tasks and verify commands. Volunteers choose which projects their quota goes to.
 - By default it leaves 20% of the weekly and 5-hour windows untouched and caps each agent run at $3 API-equivalent, with 2 attempts per task.
 
 ## How verification works
 
 1. The agent edits a fresh clone. With the Claude runner it has no shell, web access or MCP servers.
 2. Swarm checks the diff against the project's path policy, then runs the verify commands in an OS sandbox with no network.
-3. The worker signs a receipt with a local ed25519 key and opens a pull request.
+3. The worker signs a receipt with a local ed25519 key and only then opens a pull request. Claims and failed attempts are comments on one issue per task.
 4. CI re-runs verification using rules from the base branch.
 5. Another worker reproduces the result and posts a signed review.
 6. A maintainer merges.

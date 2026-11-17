@@ -1,0 +1,33 @@
+name: swarm-sync
+
+# Keeps one log issue per task: opens an issue for each newly merged task file and closes the
+# issue of each task that has a merged receipt. Workers claim tasks by commenting on these issues.
+
+on:
+  push:
+    branches: [main]
+    paths: ['.swarm/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: swarm-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sync task issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node bin/swarm.mjs init --handle sync-bot
+          node bin/swarm.mjs sync --repo "$GITHUB_REPOSITORY"

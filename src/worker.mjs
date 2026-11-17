@@ -8,7 +8,7 @@ import { git, diffSummary, checkPolicy, runVerify, describeFailure } from './ver
 import { buildReceipt } from './receipt.mjs';
 import { makeWorkDir } from './repo.mjs';
 
-export function buildPrompt({ project, task, feedback }) {
+export function buildPrompt({ project, task, feedback, hints }) {
   const steps = verifySteps(project, task);
   const lines = [
     'You are a volunteer coding agent contributing to an open-source project through Swarm.',
@@ -30,6 +30,15 @@ export function buildPrompt({ project, task, feedback }) {
     '- If the task cannot be done as written, change nothing and explain why.',
     '- End with a short summary of what you changed and why. It becomes the pull request description.',
   ];
+  const failures = Object.entries(hints?.failures || {});
+  if (failures.length) {
+    lines.push(
+      '',
+      '# Where earlier workers got stuck',
+      `Other volunteers' agents tried this task before you and did not get past: ${failures.map(([name, n]) => `${name} (${n}x)`).join(', ')}.`,
+      'Take extra care with those checks before you finish.',
+    );
+  }
   if (feedback) {
     lines.push('', '# Previous attempt', 'Your earlier changes are still in the working tree. They were not accepted:', '', feedback, '', 'Fix the problem. Do not weaken or delete tests to make them pass.');
   }
@@ -37,7 +46,7 @@ export function buildPrompt({ project, task, feedback }) {
 }
 
 /** Tasks that are ready, not finished, and not already claimed by enough workers. */
-export function openTasks(projects, mirrorDir, claims, { projectId, taskRef } = {}) {
+export function openTasks(projects, mirrorDir, claims, { projectId, taskRef, unpublished = new Set() } = {}) {
   const open = [];
   for (const project of projects) {
     if (projectId && project.id !== projectId) continue;
@@ -45,7 +54,7 @@ export function openTasks(projects, mirrorDir, claims, { projectId, taskRef } = 
     for (const task of project.tasks) {
       if (taskRef && task.ref !== taskRef && task.id !== taskRef) continue;
       const live = claims.get(task.ref) || [];
-      const state = done.has(task.id) ? 'done' : task.status !== 'ready' ? task.status : live.length >= project.replication ? 'claimed' : 'open';
+      const state = done.has(task.id) ? 'done' : task.status !== 'ready' ? task.status : unpublished.has(task.ref) ? 'unpublished' : live.length >= project.replication ? 'claimed' : 'open';
       open.push({ project, task, state, claims: live });
     }
   }
@@ -81,6 +90,8 @@ export async function workOn({ repo, mirror, board, identity, runner, project, t
   let summary = '';
   let rateLimit = null;
   let attempts = 0;
+  let failedStep = null; // shared with later workers when this attempt is given up
+  const hints = board.hints?.(task.ref);
 
   try {
     for (attempts = 1; attempts <= opts.attempts; attempts++) {
@@ -88,7 +99,7 @@ export async function workOn({ repo, mirror, board, identity, runner, project, t
       const started = Date.now();
       const res = await runner.runAgent({
         cwd: workDir,
-        prompt: buildPrompt({ project, task, feedback }),
+        prompt: buildPrompt({ project, task, feedback, hints }),
         model: opts.model,
         effort: opts.effort,
         budgetUsd: opts.budgetUsd,
@@ -104,6 +115,7 @@ export async function workOn({ repo, mirror, board, identity, runner, project, t
       summary = res.summary || summary;
       if (!res.ok) {
         fail(`Agent stopped: ${res.error}`);
+        failedStep = 'agent';
         break; // budget, rate limit or crash: retrying would only burn quota
       }
 
@@ -114,6 +126,7 @@ export async function workOn({ repo, mirror, board, identity, runner, project, t
         feedback = `The change breaks the contribution policy:\n${problems.map((p) => `- ${p}`).join('\n')}`;
         fail(`Policy: ${problems[0]}${problems.length > 1 ? ` (+${problems.length - 1} more)` : ''}`);
         verify = null;
+        failedStep = 'policy';
         continue;
       }
 
@@ -121,11 +134,12 @@ export async function workOn({ repo, mirror, board, identity, runner, project, t
       verify = await runVerify(project, task, { workDir, sandbox: opts.sandbox, onStep: (s) => step(`  ${s.name}: ${c.dim(s.run)}`) });
       if (verify.ok) break;
       feedback = describeFailure(verify);
-      fail(`Verification failed at "${verify.results.at(-1).name}"`);
+      failedStep = verify.results.at(-1).name;
+      fail(`Verification failed at "${failedStep}"`);
     }
 
     if (!verify?.ok) {
-      if (!opts.dryRun) await board.release(claim);
+      if (!opts.dryRun) await board.release(claim, { failedStep });
       record({ repo: repo.slug, task: task.ref, status: 'failed', usage, runner: runner.name });
       keep();
       return { status: 'failed', usage, rateLimit, workDir };

@@ -1,7 +1,8 @@
 # Swarm
 
-Put the Claude Code or Codex quota you are not going to use this week to work on open-source tasks,
-and get back pull requests that have been verified three times before a maintainer sees them.
+Spend the Claude Code or Codex quota you are not going to use this week on open-source projects
+**you choose**. Maintainers get pull requests that were verified before they were opened, and
+verified twice more before anyone is asked to merge.
 
 The agent runs **on your machine**, through the **official CLI**, under **your own login**. Nothing
 is pooled or relayed, and no token leaves your computer. Swarm is the part around the agent: it
@@ -62,7 +63,7 @@ to submit. `swarm review` verifies someone else's submission instead of writing 
 ```
    maintainers                         you                               everyone
  ┌──────────────┐   ┌────────────────────────────────────────┐   ┌─────────────────────┐
- │ task files + │   │ 1 claim     draft PR                   │   │ 5 CI      re-runs   │
+ │ task files + │   │ 1 claim     signed comment, no PR yet  │   │ 5 CI      re-runs   │
  │ verify cmds  │──▶│ 2 agent     edits a fresh clone        │──▶│   verify from the   │
  │ merged to    │   │             (no shell, no web, no MCP) │   │   base branch rules │
  │ main         │   │ 3 verify    policy + sandboxed checks  │   │ 6 review  another   │
@@ -71,8 +72,8 @@ to submit. `swarm review` verifies someone else's submission instead of writing 
                                                                  └─────────────────────┘
 ```
 
-1. **Claim.** A claim is a draft pull request. GitHub hands out PR numbers in order, so the lowest
-   live number wins and everyone else backs off. Stale claims expire.
+1. **Claim.** A claim is a signed comment on the task's log issue. GitHub orders comments, so the
+   earliest live claim wins and everyone else backs off. Claims expire. No pull request exists yet.
 2. **Agent.** The official CLI runs headlessly in a fresh clone under `~/.swarm/work`, never in
    your own repositories. With Claude Code the agent gets five tools (`Read`, `Edit`, `Write`,
    `Glob`, `Grep`) in `--restricted` mode: no shell, no web access, no MCP servers, no hooks.
@@ -80,13 +81,29 @@ to submit. `swarm review` verifies someone else's submission instead of writing 
    verify commands in an OS sandbox with no network, a scrubbed environment and no view of your
    home directory. If a step fails, the agent gets the output and one more attempt.
 4. **Receipt.** Your local ed25519 key signs a receipt: task, base commit, tree hash, agent, usage,
-   verify results. It is committed next to the work, so the ledger is just git history.
+   verify results. It is committed next to the work, so the ledger is just git history. Only now
+   is a pull request opened. If verification failed, the worker posts a signed release naming the
+   step that failed, and the next worker's agent is told which checks tripped others up.
 5. **CI** re-runs the policy check and the verify steps using the Swarm code and project rules from
    the *base* commit. A submission cannot bring its own verifier or its own rules.
 6. **Review.** Another volunteer's `swarm review` re-checks the signature and structure, reproduces
    the verify steps in their sandbox, then has their agent read the change against the task. The
    review is signed too.
 7. **Merge.** `swarm merge` refuses without the review quorum. A maintainer still decides.
+
+## You choose where your quota goes
+
+```bash
+swarm choose serg1210/swarm#core
+```
+
+```bash
+swarm choose some-org/some-project
+```
+
+`swarm run` then works only on the projects you picked, rotating between them. Your tokens are
+spent on your machine, on tasks those projects' maintainers wrote, and the result is public. You
+are not lending capacity to other people: nobody can send your agent a task of their own.
 
 ## It does not eat the quota you need
 
@@ -104,7 +121,7 @@ to submit. `swarm review` verifies someone else's submission instead of writing 
 | A task tries to attack the volunteer's machine | Only task files merged by the project's maintainers are executed; issues and comments from strangers never are. The agent has no shell or network. Verify commands run sandboxed. |
 | The agent "passes" by editing the tests | Task files, pinned acceptance tests, manifests, CI workflows, receipts and the verifier itself are protected paths. A task can restrict the agent to specific files. Reviewers look for weakened tests. |
 | A volunteer lies about the result | Nothing from the volunteer's machine is trusted. CI recomputes the tree and diff hashes and re-runs every check from the base branch's rules. |
-| Repositories get flooded with junk PRs | Maintainers opt in. One live claim per task. Nothing is pushed unless verification passed locally. |
+| Repositories get flooded with junk PRs | Maintainers opt in. A pull request is opened only after verification passed on the worker's machine; claims and failed attempts are comments on one issue per task. One live claim per task. |
 | Review collusion | Reviews must be signed by a different key than the submission, for the exact commit. This is weak against one person with two keys, which is why a human merges. |
 | Your credentials leak | Swarm never reads them. It starts the unmodified official binary and reads its JSON output. |
 
@@ -155,7 +172,8 @@ What to build, and how you will know it is done.
 ```
 
 Copy [`.github/workflows/swarm-verify.yml`](.github/workflows/swarm-verify.yml), require its status
-check on your default branch and allow merge commits. Volunteers then run
+check on your default branch and allow merge commits. Run `swarm sync` after merging new tasks
+(or copy [`swarm-sync.yml`](.github/workflows/swarm-sync.yml) to do it on every push). Volunteers then run
 `swarm run --repo you/your-repo`. More in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Commands
@@ -165,9 +183,11 @@ check on your default branch and allow merge commits. Volunteers then run
 | `swarm init` | create your local signing key |
 | `swarm doctor` | check tools, login and the sandbox |
 | `swarm quota` | show your rate-limit windows |
+| `swarm choose <repo>[#project]` | pick the projects your quota goes to |
 | `swarm tasks` | list tasks and their state |
 | `swarm run` | work on a task (`--task`, `--project`, `--max-tasks`, `--dry-run`) |
 | `swarm review` | independently verify a submission |
+| `swarm sync` | maintainers: open a log issue for each new task, close finished ones |
 | `swarm merge <id>` | maintainers: re-verify, check quorum, merge |
 | `swarm verify` | maintainers: run verify steps on the current checkout |
 | `swarm ledger` | leaderboard from merged receipts |
@@ -182,7 +202,13 @@ check on your default branch and allow merge commits. Volunteers then run
 - **The Codex runner is experimental**, and Swarm cannot yet read Codex quota windows.
 - **The agent cannot run code.** That is deliberate, and it makes hard tasks harder. Tasks need to
   be written so they can be finished by reading.
-- **Sybil resistance is thin.** Worker identity is a local key. Reputation is future work.
+- **Sybil resistance is thin.** Worker identity is a local key. Someone can keep re-claiming a task
+  to block it until the claim lapses. Reputation is future work.
+- **Workers share very little context.** Only the name of the verify step that stopped earlier
+  attempts is passed on. Free-text notes from one volunteer's agent are never put into another's
+  prompt, because that would be an injection path.
+- **Built for small repositories.** Each volunteer keeps a full clone and each task gets a fresh
+  one. Large monorepos need partial and sparse checkouts, which are not implemented.
 - **Plan terms can change.** Running the official CLI on your own machine under your own login is
   permitted today. Draining a subscription to zero on a timer is not ordinary individual use, which
   is one reason for the reserve. Swarm is not affiliated with Anthropic or OpenAI. Read your plan's
@@ -195,9 +221,24 @@ Using spare subscription quota for good is not a new idea. [imbue-ai/mngr](https
 and [prompt-for-good](https://github.com/ImsBrosLabs/prompt-for-good) all explore it. Swarm's
 contribution is the pipeline around the agent: maintainer-written tasks with pinned tests, an agent
 with no code execution, sandboxed verification, signed receipts, CI that trusts nothing from the
-volunteer, and independent review. Relay proxies that collect subscription logins and expose them
-as a shared API are a different thing, and Swarm does not do that.
-[docs/RESEARCH.md](docs/RESEARCH.md) has the full survey.
+volunteer, and independent review.
+
+Two neighbouring designs are worth telling apart from this one:
+
+- **Capacity exchange.** [agent-torrent](https://github.com/raghavan/agent-torrent) is a
+  peer-to-peer mesh where peers run each other's tasks on their own accounts and settle in
+  credits. Swarm borrows its signed-envelope idea and nothing else: here nobody can send your
+  agent a task, only maintainers of projects you chose can, by merging a task file.
+- **Relay proxies** collect subscription logins and expose them as a shared API. Swarm does not
+  touch credentials at all.
+
+Two ideas shaped the coordination design. [DeLM](https://github.com/yuzhenmao/DeLM) showed that
+agents sharing a task queue and context beat agents working blind; the task log issue is a
+deliberately narrow version of that across volunteers. Anthropic's
+[Redesigning source control](https://www.anthropic.com/engineering/redesigning-source-control)
+and Zed's [Delta](https://zed.dev/blog/delta-public-beta) both report that branches and pull
+requests are what break first at agent volume, which is why a Swarm pull request exists only for
+work that already passed. [docs/RESEARCH.md](docs/RESEARCH.md) has the full survey.
 
 ## Development
 
