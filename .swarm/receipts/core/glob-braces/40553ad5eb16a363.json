@@ -1,0 +1,49 @@
+{
+  "v": 1,
+  "kind": "receipt",
+  "project": "core",
+  "task": "glob-braces",
+  "base": "1fc2670f374ffad55344dc93255a73bd1c175a70",
+  "work": "5ad245ca6c1e96b409518bf1eede6195606a9bde",
+  "tree": "53fa42e74bc0292e8519e65572694c9e3c35c6af",
+  "diffSha256": "b7438a9bd9901156e8ded1928e651e6e760931d063564c972e2c97aeed345bc1",
+  "filesChanged": 2,
+  "linesChanged": 31,
+  "agent": {
+    "runner": "claude",
+    "model": "claude-sonnet-5-5",
+    "version": "2.1.326"
+  },
+  "usage": {
+    "inputTokens": 49078,
+    "outputTokens": 3234,
+    "costUsd": 0.0697421,
+    "turns": 11,
+    "durationMs": 22882
+  },
+  "attempts": 1,
+  "sandbox": "seatbelt",
+  "verify": [
+    {
+      "name": "unit-tests",
+      "run": "node --test test/*.test.mjs",
+      "exit": 0,
+      "ms": 10266,
+      "outputSha256": "2375109b879f17f75792ebc8518f09d1e9f55b7203d982bd482a6abf4dc3b82e"
+    },
+    {
+      "name": "task-1",
+      "run": "node --test .swarm/projects/core/tasks/glob-braces.test.mjs",
+      "exit": 0,
+      "ms": 106,
+      "outputSha256": "9933feca6e14d6f4bbdbbaa2d7b043f260286b5c06465fc669c7842741f5cec0"
+    }
+  ],
+  "ts": "2026-11-17T20:35:17.366Z",
+  "signer": {
+    "id": "40553ad5eb16a363",
+    "handle": "serg1210",
+    "publicKey": "MCowBQYDK2VwAyEAwQ4qMVtkDJ1fGlPS9Yjqe2rUrpPnGUEVHRY2DPRQgQM="
+  },
+  "sig": "Ju7D8D8tqMRwYzK3+x3mMEUdpxvzruUKFda2Mbpw+Mwqb2rlPCzSS3ZK7Wcygz4GVkSL9U++Ieybv+aCe7IqBg=="
+}
