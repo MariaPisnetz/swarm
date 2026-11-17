@@ -296,6 +296,11 @@ export class GitHubBoard {
   async merge(sub) {
     // A merge commit keeps the work commit (and so the receipt's tree hash) in history.
     await this.gh(['pr', 'merge', String(sub.id), '-R', this.repo, '--merge']);
+    // Leave no branch behind when the submission was pushed to this repository rather than a fork.
+    const pr = JSON.parse(await this.gh(['pr', 'view', String(sub.id), '-R', this.repo, '--json', 'headRefName,isCrossRepository']));
+    if (!pr.isCrossRepository && pr.headRefName.startsWith('swarm/')) {
+      await run('gh', ['api', '-X', 'DELETE', `repos/${this.repo}/git/refs/heads/${pr.headRefName}`]);
+    }
     return { where: sub.url };
   }
 

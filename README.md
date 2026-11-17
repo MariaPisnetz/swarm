@@ -11,28 +11,29 @@ a receipt and opens the pull request.
 
 ```
 $ swarm run --task core/glob-braces
+› Syncing serg1210/swarm
 › Checking your quota
-  5-hour: 21% used, resets in 4h 30m; weekly: 39% used, resets in 3d 23h
+  5-hour: 28% used, resets in 4h 5m; weekly: 40% used, resets in 3d 23h
 › Claiming core/glob-braces: Support {a,b} alternation in path globs
 › Agent claude working (attempt 1/2, budget $2.00)
 › Verifying in seatbelt sandbox
 ›   unit-tests: node --test test/*.test.mjs
 ›   task-1: node --test .swarm/projects/core/tasks/glob-braces.test.mjs
-✓ Verified: unit-tests, task-1 (2 files, 34 lines)
-✓ Submitted core/glob-braces → branch swarm/core/glob-braces/4d828f4f  ($0.09 API-equivalent, 25s)
-
-$ swarm review          # a different worker, on a different key
-› Reviewing core/glob-braces from worker 4d828f4f
-✓ Verification reproduced
-› Agent claude reading the change
-✓ Review posted: approve
+✓ Verified: unit-tests, task-1 (2 files, 31 lines)
+✓ Submitted core/glob-braces → https://github.com/serg1210/swarm/pull/12  ($0.07 API-equivalent, 23s)
 ```
 
-That is the output of a real run during development (Claude Sonnet, against a local test remote).
+That is the first real run against this repository. You can read everything it left behind:
+the [claim log](https://github.com/serg1210/swarm/issues/3), the
+[pull request](https://github.com/serg1210/swarm/pull/12) with its CI re-verification and signed
+review, and the [receipt](.swarm/receipts/core/glob-braces/40553ad5eb16a363.json). In that run the
+reviewer was a second key on the maintainer's own account, which exercises the mechanics but is
+not an independent review.
 
-> **Status: v0.1, launched today.** The Claude Code runner and the macOS sandbox are tested end to
-> end. The Codex runner is experimental, and the Linux (bubblewrap) and Docker sandbox modes are
-> implemented but not yet tested by the maintainers. See [Known limits](#known-limits).
+> **Status: v0.1.** The Claude Code runner, the macOS sandbox and the GitHub flow for someone with
+> push access are tested end to end. Not yet exercised: submitting from a fork (what every outside
+> volunteer does), the Codex runner, and the Linux (bubblewrap) and Docker sandbox modes. See
+> [Known limits](#known-limits).
 
 ## Try it
 
