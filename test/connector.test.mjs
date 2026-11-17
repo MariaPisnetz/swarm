@@ -174,6 +174,51 @@ test('delegate mode: a background job runs the CLI and can be polled', async () 
   c.close();
 });
 
+test('shell mode: an agent with its own tools edits the clone, Swarm verifies and submits', () => {
+  // This is the path a cloud session takes: no connector, just the CLI printing JSON.
+  const env = { ...process.env, ...GIT_ENV, NO_COLOR: '1', SWARM_HOME: path.join(tmp, 'cloud'), CLAUDE_CODE_REMOTE: 'true', SWARM_HANDLE: 'cloud-test' };
+  const swarm = (args) => {
+    const r = spawnSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
+    return { code: r.status, json: r.stdout.trim() ? JSON.parse(r.stdout) : null, err: r.stderr };
+  };
+  const begun = swarm(['task', 'begin', '--repo', remote, '--task', 'demo/two', '--agent', 'cloud-session']);
+  assert.equal(begun.json.task, 'demo/two', begun.err);
+  assert.ok(fs.existsSync(path.join(begun.json.workDir, 'src/index.mjs')));
+  assert.match(begun.json.instructions, /task finish --session/);
+  assert.match(begun.json.instructions, /You may run the verify steps yourself/);
+
+  // Editing a protected file directly is caught by the policy check at the end.
+  fs.writeFileSync(path.join(begun.json.workDir, 'check.mjs'), 'process.exit(0)\n');
+  const bad = swarm(['task', 'finish', '--session', begun.json.session, '--summary', 'x']);
+  assert.equal(bad.code, 1);
+  assert.equal(bad.json.failedStep, 'policy');
+
+  sh('git', ['checkout', 'HEAD', '--', 'check.mjs'], begun.json.workDir); // undo the edit, as an agent would
+  fs.writeFileSync(path.join(begun.json.workDir, 'src/two.mjs'), 'export const two = () => 2;\n');
+  const good = swarm(['task', 'finish', '--session', begun.json.session, '--summary', 'Added src/two.mjs.']);
+  assert.equal(good.code, 0, good.err);
+  assert.equal(good.json.ok, true);
+  assert.equal(good.json.sandbox, 'cloud-vm');
+
+  const [branch] = refs('refs/heads/swarm').filter((r) => r.includes('/two/'));
+  const receiptFile = sh('git', ['diff', '--name-only', `${branch}~1`, branch], remote).trim();
+  const receipt = JSON.parse(sh('git', ['show', `${branch}:${receiptFile}`], remote));
+  assert.equal(receipt.agent.runner, 'shell:cloud-session');
+  assert.equal(receipt.signer.handle, 'cloud-test');
+  assert.equal(receipt.sandbox, 'cloud-vm');
+});
+
+test('a key supplied by the environment signs as the same worker everywhere', () => {
+  const home = path.join(tmp, 'idhome');
+  const env = { ...process.env, NO_COLOR: '1', SWARM_HOME: home, SWARM_HANDLE: 'porter' };
+  const run = (args, extra = {}) => spawnSync(process.execPath, [BIN, ...args], { env: { ...env, ...extra }, encoding: 'utf8' }).stdout.trim();
+  run(['init']);
+  const id = run(['identity']);
+  const blob = run(['identity', 'export']);
+  assert.match(id, /^[0-9a-f]{16} \(porter\)$/);
+  assert.equal(run(['identity'], { SWARM_HOME: path.join(tmp, 'empty'), SWARM_IDENTITY: blob }), id);
+});
+
 test('path confinement survives symlinks', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-paths-'));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-outside-'));

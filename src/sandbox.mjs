@@ -5,6 +5,10 @@
 //   seatbelt  macOS sandbox-exec (the mechanism Codex and Claude Code use on macOS)
 //   bwrap     Linux bubblewrap
 //   docker    any platform, when the project names an image
+//   cloud-vm  inside a Claude Code cloud session: the session's VM is disposable, holds no
+//             credentials (GitHub access is injected by a proxy outside it) and is not the
+//             volunteer's machine, so it is the sandbox. Network there follows the cloud
+//             environment's allowlist rather than being off.
 //   none      refused unless the user passes --unsafe-no-sandbox
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,6 +17,8 @@ import { run, which, ensureDir } from './util.mjs';
 
 export async function pickSandbox({ requested = 'auto', project } = {}) {
   if (requested !== 'auto') return requested;
+  // Checked first: nested OS sandboxes are unreliable inside the cloud VM's container.
+  if (process.env.CLAUDE_CODE_REMOTE === 'true') return 'cloud-vm';
   if (process.platform === 'darwin' && fs.existsSync('/usr/bin/sandbox-exec')) return 'seatbelt';
   if (process.platform === 'linux' && (await which('bwrap'))) return 'bwrap';
   if (project?.sandbox?.image && (await which('docker'))) return 'docker';
@@ -113,7 +119,7 @@ export async function runSandboxed(command, { workDir, mode, project, timeoutMs 
       args.push('-v', `${workDir}:/work`, '-w', '/work', '-e', 'CI=1', '-e', 'NO_COLOR=1', '-e', 'HOME=/tmp', '-e', 'SWARM_SANDBOX=1');
       if (typeof process.getuid === 'function') args.push('--user', `${process.getuid()}:${process.getgid()}`);
       res = await run('docker', [...args, image, '/bin/sh', '-c', command], { timeoutMs });
-    } else if (mode === 'none') {
+    } else if (mode === 'none' || mode === 'cloud-vm') {
       res = await run('/bin/sh', ['-c', command], { cwd: workDir, env, timeoutMs });
     } else {
       throw new Error(`Unknown sandbox mode: ${mode}`);

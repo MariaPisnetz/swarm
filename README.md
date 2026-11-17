@@ -1,13 +1,22 @@
 # Swarm
 
-Spend the Claude Code or Codex quota you are not going to use this week on open-source projects
-**you choose**. Maintainers get pull requests that were verified before they were opened, and
-verified twice more before anyone is asked to merge.
+Install the plugin, choose an open-source project, and the Claude quota you were not going to use
+is spent doing tasks that project's maintainers wrote.
 
-The agent runs **on your machine**, through the **official CLI**, under **your own login**. Nothing
-is pooled or relayed, and no token leaves your computer. Swarm is the part around the agent: it
-picks a task a maintainer wrote, boxes the agent in, runs the project's checks in a sandbox, signs
-a receipt and opens the pull request.
+## Three steps
+
+1. **Install the plugin.** In Claude Code: `/plugin install swarm --marketplace serg1210/swarm`.
+   In the Claude desktop app or claude.ai: Customize > Plugins > Add marketplace > `serg1210/swarm`.
+2. **Choose a project.** Say "set up Swarm". Claude lists the projects that opted in and you pick.
+3. **Leftover quota does the work.** Claude offers to schedule it: on your computer, where Swarm
+   reads your quota windows and keeps a 20% reserve, or in the cloud, where it runs with your
+   laptop closed shortly before your weekly window resets. Each run does one task and opens a
+   pull request under your GitHub account.
+
+Your tokens are spent by your own Claude, on a project you chose. Nothing is pooled or relayed.
+What Swarm adds around the agent is the part that makes the result worth a maintainer's time: it
+claims a task a maintainer wrote, checks the change against the project's rules, runs the
+project's checks, signs a receipt and only then opens the pull request.
 
 ```
 $ swarm run --task core/glob-braces
@@ -35,7 +44,9 @@ not an independent review.
 > volunteer does), the Codex runner, and the Linux (bubblewrap) and Docker sandbox modes. See
 > [Known limits](#known-limits).
 
-## Try it
+## Without the plugin
+
+The same pipeline as a plain command-line tool.
 
 Needs Node 20+, `git`, the [`gh`](https://cli.github.com) CLI (logged in), and Claude Code or Codex
 logged in with your own plan. No npm dependencies are installed.
@@ -59,23 +70,17 @@ npx github:serg1210/swarm run --dry-run
 `--dry-run` does everything locally and pushes nothing, so you can read the result first. Drop it
 to submit. `swarm review` verifies someone else's submission instead of writing one.
 
-## Install it in your agent
+## Where it runs
 
-Swarm is also an MCP connector, so the agent you already use can run it, including on a daily
-schedule. [docs/INSTALL.md](docs/INSTALL.md) has the steps for each host.
-
-| Host | Install | Daily run |
+| Where | How | Tested |
 |---|---|---|
-| Claude Code | `/plugin marketplace add serg1210/swarm`, then `/plugin install swarm@swarm-at-home` | `/swarm:swarm-schedule` |
-| Claude desktop app (Cowork) | Customize > Plugins > Add marketplace > `serg1210/swarm` | a local scheduled task; cloud tasks cannot reach a local connector |
-| Codex | `codex mcp add swarm -- swarm mcp` | cron with `codex exec` |
-| Hermes | `mcp_servers.swarm` in `~/.hermes/config.yaml` | `hermes cron create` |
+| Claude Code on your computer | The plugin's connector starts the official CLI boxed in (no shell, no network), reads your quota windows first | Yes |
+| Claude Code cloud sessions and cloud scheduled tasks | The skill runs the CLI it carries inside the session's VM; this agent writes the change; GitHub goes through the session's connection | On a local stand-in only; not yet in a real cloud session |
+| Cowork on your computer | Same plugin; the connector submits, because a Cowork task's own shell cannot push to GitHub | No |
+| Codex, Hermes, any MCP host | `swarm mcp` as a connector | No |
+| No agent host | `npx github:serg1210/swarm run` from your own timer | Yes |
 
-If the official Claude Code or Codex CLI is on the machine, the connector starts it boxed in as
-usual. If not, your agent does the task itself through file tools that reach only the task's
-fresh clone and only the paths the task allows. Either way Swarm claims, verifies in the sandbox,
-signs and opens the pull request. Tested in Claude Code; Cowork, Codex and Hermes installs are
-written from their documentation and not yet exercised.
+[docs/INSTALL.md](docs/INSTALL.md) has the steps for each.
 
 ## How it works
 
@@ -203,10 +208,12 @@ check on your default branch and allow merge commits. Run `swarm sync` after mer
 | `swarm doctor` | check tools, login and the sandbox |
 | `swarm quota` | show your rate-limit windows |
 | `swarm choose <repo>[#project]` | pick the projects your quota goes to |
+| `swarm projects` | list projects that opted in |
 | `swarm tasks` | list tasks and their state |
 | `swarm run` | work on a task (`--task`, `--project`, `--max-tasks`, `--dry-run`) |
 | `swarm review` | independently verify a submission |
 | `swarm mcp` | run as an MCP connector for Claude Code, Cowork, Codex or Hermes |
+| `swarm task begin` / `finish` | for an agent that does the task itself, as in a cloud session |
 | `swarm sync` | maintainers: open a log issue for each new task, close finished ones |
 | `swarm merge <id>` | maintainers: re-verify, check quorum, merge |
 | `swarm verify` | maintainers: run verify steps on the current checkout |
@@ -222,9 +229,14 @@ check on your default branch and allow merge commits. Run `swarm sync` after mer
 - **The Codex runner is experimental**, and Swarm cannot yet read Codex quota windows.
 - **The agent cannot run code.** That is deliberate, and it makes hard tasks harder. Tasks need to
   be written so they can be finished by reading.
-- **Connector mode trusts your host.** When your own agent does the task through the connector,
-  Swarm confines its file tools, not the agent. It also cannot see that host's quota, and the
-  model named in the receipt is self-reported.
+- **When your own agent does the task, Swarm trusts it more.** Through the connector its file
+  tools are confined to the task's clone; over a shell, as in a cloud session, nothing confines it
+  and the policy check at the end is what catches a change outside the task. The model named in
+  the receipt is self-reported.
+- **In the cloud, leftover is a matter of timing.** A cloud session cannot read your quota
+  windows, so there is no reserve: the run is scheduled shortly before your weekly reset and does
+  one task. Checks there run in the session's VM with that environment's network access, not
+  with the network off.
 - **Sybil resistance is thin.** Worker identity is a local key. Someone can keep re-claiming a task
   to block it until the claim lapses. Reputation is future work.
 - **Workers share very little context.** Only the name of the verify step that stopped earlier

@@ -1,0 +1,19 @@
+{
+  "_comment": "Projects that opted in to Swarm. A project is listed here by a pull request to this file, reviewed by a maintainer. Listing means the repository has a .swarm directory with tasks and verify steps; it is not an endorsement of the project.",
+  "projects": [
+    {
+      "repo": "serg1210/swarm",
+      "project": "core",
+      "name": "Swarm core",
+      "description": "The Swarm CLI and connector themselves: commands, boards, quota detection.",
+      "languages": ["JavaScript"]
+    },
+    {
+      "repo": "serg1210/swarm",
+      "project": "gtm",
+      "name": "Swarm GTM harness",
+      "description": "Go-to-market copy and the checks that gate it: fact-backed claims, readability, review rubrics.",
+      "languages": ["Markdown", "JavaScript"]
+    }
+  ]
+}

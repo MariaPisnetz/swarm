@@ -17,7 +17,8 @@ src/board/git.mjs        the same over plain git refs
 src/runners/*.mjs        claude, codex, mock
 src/mcp.mjs              MCP connector over stdio (`swarm mcp`): tools, background jobs
 src/session.mjs          connector sessions and their confined file tools   (protected)
-plugin/                  Claude plugin: connector config, skills, a pinned copy of the CLI
+plugin/                  Claude plugin: one skill that carries a pinned copy of the CLI, plus connector config
+src/registry.json        projects that opted in, shown when a user chooses
 src/sandbox.mjs          seatbelt, bubblewrap, docker           (protected)
 src/verify.mjs           diff policy and verify steps           (protected)
 src/receipt.mjs          receipts, reviews, structural check    (protected)
@@ -102,7 +103,20 @@ stdout carries only protocol messages.
   Sessions are JSON files under `~/.swarm/sessions`, read against the rules as of the commit the
   session started from.
 
-The plugin in `plugin/` bundles a copy of the CLI under `plugin/server` so its connector starts
+- **Shell mode.** `swarm task begin`, `finish` and `abandon` are the same sessions driven from a
+  shell, printing JSON. This is what a Claude Code cloud session uses: the plugin's local
+  connector does not exist there, but the skill and its scripts do. The agent edits the clone
+  with its own tools, so confinement is the policy check at `finish`, not the tools. Inside a
+  cloud session (`CLAUDE_CODE_REMOTE=true`) verify steps run in sandbox mode `cloud-vm`: the
+  session's disposable VM, with a scrubbed environment.
+
+GitHub is reached only through `gh api` and REST. Cloud sessions go through a proxy that rejects
+GraphQL, which `gh pr`, `gh issue` and `gh repo view` depend on, so the board avoids them
+everywhere rather than having two code paths.
+
+The plugin in `plugin/` has one skill, `swarm`, which bundles a copy of the CLI under
+`skills/swarm/scripts/swarm`. A skill's scripts travel with it to every place skills load, so
+the same copy serves the shell path in cloud sessions and the local connector, which starts
 with plain `node`. `node scripts/build-plugin.mjs` refreshes that copy; it is cut by a maintainer,
 so plugin users run a reviewed snapshot rather than every merged change. The plugin has no
 top-level `bin/` directory because claude.ai and Cowork refuse plugins that have one.

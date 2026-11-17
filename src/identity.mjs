@@ -11,7 +11,28 @@ export function fingerprint(publicKeyB64) {
   return sha256(Buffer.from(publicKeyB64, 'base64')).slice(0, 16);
 }
 
+/**
+ * SWARM_IDENTITY (base64 JSON from `swarm identity export`) lets a cloud environment sign as
+ * the same worker on every run. Without it each fresh machine makes its own key.
+ */
+function fromEnv() {
+  if (!process.env.SWARM_IDENTITY) return null;
+  try {
+    const id = JSON.parse(Buffer.from(process.env.SWARM_IDENTITY, 'base64').toString('utf8'));
+    if (!id.publicKey || !id.privateKey) return null;
+    return { handle: id.handle || 'anon', publicKey: id.publicKey, privateKey: id.privateKey, id: fingerprint(id.publicKey) };
+  } catch {
+    return null;
+  }
+}
+
+export function exportIdentity(identity) {
+  return Buffer.from(JSON.stringify({ handle: identity.handle, publicKey: identity.publicKey, privateKey: identity.privateKey })).toString('base64');
+}
+
 export function loadIdentity() {
+  const env = fromEnv();
+  if (env) return env;
   const file = keyFile();
   if (!fs.existsSync(file)) return null;
   const id = readJson(file);

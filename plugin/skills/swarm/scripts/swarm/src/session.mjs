@@ -56,12 +56,14 @@ function describe(session, project, task, hints) {
     allowedPaths: task.paths,
     verifySteps: verifySteps(project, task).map((s) => ({ name: s.name, run: s.run })),
     attemptsLeft: MAX_FINISH_ATTEMPTS - session.attempts,
-    instructions: buildPrompt({ project, task, hints, mode: 'connector' }),
+    // Shell mode hands out the directory; connector mode never does, its file tools are the only way in.
+    ...(session.mode === 'shell' ? { workDir: session.workDir } : {}),
+    instructions: buildPrompt({ project, task, hints, mode: session.mode || 'connector', workDir: session.workDir, session: session.id }),
   };
 }
 
 /** Claim a task and prepare its clone. One session at a time; an unfinished one is resumed. */
-export async function beginSession({ identity, targets, taskRef, agent, model }) {
+export async function beginSession({ identity, targets, taskRef, agent, model, mode = 'connector' }) {
   const existing = activeSession();
   if (existing) {
     const { mirror } = await openRepo(existing.repoSpec, identity, { at: existing });
@@ -86,6 +88,7 @@ export async function beginSession({ identity, targets, taskRef, agent, model })
     const session = {
       id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       status: 'active',
+      mode,
       repoSpec: target.repo,
       taskRef: pick.task.ref,
       base: mirror.base,
@@ -94,7 +97,7 @@ export async function beginSession({ identity, targets, taskRef, agent, model })
       workDir,
       claim,
       attempts: 0,
-      agent: { runner: `connector:${String(agent || 'unknown').slice(0, 40)}`, model: String(model || 'unreported').slice(0, 80), selfReported: true },
+      agent: { runner: `${mode}:${String(agent || 'unknown').slice(0, 40)}`, model: String(model || 'unreported').slice(0, 80), selfReported: true },
       startedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + pick.project.claimTtlMinutes * 60_000).toISOString(),
     };

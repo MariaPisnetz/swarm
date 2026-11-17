@@ -1,4 +1,8 @@
-// Coordination over GitHub, through the `gh` CLI. No server, no tokens handled by Swarm.
+// Coordination over GitHub, through `gh api`. No server, no tokens handled by Swarm.
+//
+// Only GitHub's REST API is used. Claude Code cloud sessions reach GitHub through a proxy that
+// rejects GraphQL, which rules out `gh pr`, `gh issue` and `gh repo view`; REST works both there
+// and on a laptop, so there is one code path.
 //
 // Pull requests are expensive for maintainers, so they are reserved for work that already
 // passed verification. Everything before that is an append-only log on one issue per task:
@@ -64,17 +68,7 @@ export function resolveClaims(comments, { taskRef, ttlMinutes, now = Date.now(),
   return { live, failures };
 }
 
-const ISSUES_QUERY = `query($owner: String!, $name: String!) {
-  repository(owner: $owner, name: $name) {
-    issues(first: 100, states: OPEN, orderBy: { field: CREATED_AT, direction: ASC }) {
-      nodes {
-        number title url authorAssociation
-        author { __typename login }
-        comments(last: 100) { nodes { databaseId body createdAt } }
-      }
-    }
-  }
-}`;
+const CLOUD = process.env.CLAUDE_CODE_REMOTE === 'true';
 
 export class GitHubBoard {
   kind = 'github';
@@ -87,18 +81,26 @@ export class GitHubBoard {
     this.issues = new Map();
   }
 
-  gh(args, opts) {
-    return must('gh', args, opts);
+  /** One REST call. `body` is sent as JSON. Returns the parsed response (or null for 204). */
+  async api(method, endpoint, body) {
+    const args = ['api', '-X', method, endpoint, '-H', 'Accept: application/vnd.github+json'];
+    if (body !== undefined) args.push('--input', '-');
+    const out = await must('gh', args, body !== undefined ? { input: JSON.stringify(body) } : {});
+    return out.trim() ? JSON.parse(out) : null;
+  }
+
+  get repoPath() {
+    return `repos/${this.repo}`;
   }
 
   async login() {
-    this._login ??= (await this.gh(['api', 'user', '-q', '.login'])).trim();
+    this._login ??= (await this.api('GET', 'user')).login;
     return this._login;
   }
 
   async canPush() {
-    this._perm ??= (await this.gh(['repo', 'view', this.repo, '--json', 'viewerPermission', '-q', '.viewerPermission'])).trim();
-    return ['ADMIN', 'MAINTAIN', 'WRITE'].includes(this._perm);
+    this._push ??= Boolean((await this.api('GET', this.repoPath)).permissions?.push);
+    return this._push;
   }
 
   /**
@@ -110,47 +112,58 @@ export class GitHubBoard {
     const name = this.repo.split('/')[1];
     let owner = this.repo.split('/')[0];
     if (!(await this.canPush())) {
-      owner = await this.login();
-      await run('gh', ['repo', 'fork', this.repo, '--clone=false']);
+      // SWARM_FORK names the fork to push to, for sessions that cannot ask GitHub who they are.
+      owner = process.env.SWARM_FORK ? process.env.SWARM_FORK.split('/')[0] : await this.login();
+      await run('gh', ['api', '-X', 'POST', `${this.repoPath}/forks`]); // no-op when the fork exists
     }
-    const proto = (await run('gh', ['config', 'get', 'git_protocol', '-h', 'github.com'])).stdout.trim();
+    const proto = CLOUD ? 'https' : (await run('gh', ['config', 'get', 'git_protocol', '-h', 'github.com'])).stdout.trim();
     const url = proto === 'ssh' ? `git@github.com:${owner}/${name}.git` : `https://github.com/${owner}/${name}.git`;
     await run('git', ['remote', 'remove', 'swarm-push'], { cwd: workDir });
     await git(workDir, ['remote', 'add', 'swarm-push', url]);
-    if (proto !== 'ssh') await git(workDir, ['config', 'credential.https://github.com.helper', '!gh auth git-credential']);
+    // On a laptop gh supplies the https credential. In a cloud session the GitHub proxy does,
+    // and a helper of ours would only get in its way.
+    if (proto !== 'ssh' && !CLOUD) await git(workDir, ['config', 'credential.https://github.com.helper', '!gh auth git-credential']);
     return { remote: 'swarm-push', owner };
   }
 
   /** Task issues opened by a maintainer (or by the repository's own Actions bot), by task ref. */
   async #taskIssues() {
-    const [owner, name] = this.repo.split('/');
-    const out = await this.gh(['api', 'graphql', '-f', `query=${ISSUES_QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`]);
+    const list = await this.api('GET', `${this.repoPath}/issues?state=open&per_page=100&sort=created&direction=asc`);
     const issues = new Map();
-    for (const n of JSON.parse(out).data.repository.issues.nodes) {
+    for (const n of list) {
+      if (n.pull_request) continue; // the issues endpoint also returns pull requests
       const m = TITLE.exec(n.title);
-      const trusted = TRUSTED.has(n.authorAssociation) || (n.author?.__typename === 'Bot' && n.author.login === 'github-actions');
+      const trusted = TRUSTED.has(n.author_association) || (n.user?.type === 'Bot' && n.user.login === 'github-actions[bot]');
       if (!m || !trusted) continue;
       const ref = `${m[1]}/${m[2]}`;
       if (issues.has(ref)) continue; // the oldest issue for a task is the log
+      const comments = n.comments ? await this.api('GET', `${this.repoPath}/issues/${n.number}/comments?per_page=100`) : [];
       issues.set(ref, {
         number: n.number,
-        url: n.url,
-        comments: n.comments.nodes.map((c) => ({ id: c.databaseId, body: c.body, createdAt: c.createdAt })),
+        url: n.html_url,
+        comments: comments.map((c) => ({ id: c.id, body: c.body, createdAt: c.created_at })),
       });
     }
     return issues;
   }
 
   async #openPrs() {
-    const out = await this.gh(['pr', 'list', '-R', this.repo, '--state', 'open', '--limit', '500', '--json', 'number,title,author,headRefOid,body,url']);
-    return JSON.parse(out)
+    const list = await this.api('GET', `${this.repoPath}/pulls?state=open&per_page=100&sort=created&direction=asc`);
+    return list
       .map((pr) => {
         const m = TITLE.exec(pr.title);
         if (!m) return null;
-        return { ...pr, taskRef: `${m[1]}/${m[2]}`, worker: WORKER_MARK.exec(pr.body || '')?.[1] || `gh:${pr.author?.login}` };
+        return {
+          number: pr.number,
+          url: pr.html_url,
+          headRefOid: pr.head.sha,
+          headRefName: pr.head.ref,
+          sameRepo: pr.head.repo?.full_name === this.repo,
+          taskRef: `${m[1]}/${m[2]}`,
+          worker: WORKER_MARK.exec(pr.body || '')?.[1] || `gh:${pr.user?.login}`,
+        };
       })
-      .filter(Boolean)
-      .sort((a, b) => a.number - b.number);
+      .filter(Boolean);
   }
 
   #resolve(project, task, issue) {
@@ -195,7 +208,7 @@ export class GitHubBoard {
   async #comment(issue, kind, fields, text) {
     const doc = signDoc({ kind, ...fields, ts: new Date().toISOString() }, this.identity);
     const body = `${text}\n\n<!-- swarm:${kind} ${encode(doc)} -->`;
-    return (await this.gh(['issue', 'comment', String(issue.number), '-R', this.repo, '--body', body])).trim();
+    return (await this.api('POST', `${this.repoPath}/issues/${issue.number}/comments`, { body })).html_url;
   }
 
   async claim({ project, task }) {
@@ -243,15 +256,12 @@ export class GitHubBoard {
       '',
       `<!-- swarm:worker ${this.identity.id} -->`,
     ].join('\n');
-    const url = (await this.gh(['pr', 'create', '-R', this.repo, '--base', this.mirror.branch, '--head', `${owner}:${branch}`, '--title', `[swarm] ${task.ref}: ${task.title}`, '--body', body]))
-      .trim()
-      .split('\n')
-      .pop();
-    return { id: Number(url.split('/').pop()), where: url };
+    const pr = await this.api('POST', `${this.repoPath}/pulls`, { title: `[swarm] ${task.ref}: ${task.title}`, head: `${owner}:${branch}`, base: this.mirror.branch, body });
+    return { id: pr.number, where: pr.html_url };
   }
 
   async submissions() {
-    return (await this.#openPrs()).map((pr) => ({ id: pr.number, taskRef: pr.taskRef, worker: pr.worker, head: pr.headRefOid, url: pr.url, mine: pr.worker === this.identity?.id }));
+    return (await this.#openPrs()).map((pr) => ({ id: pr.number, taskRef: pr.taskRef, worker: pr.worker, head: pr.headRefOid, url: pr.url, branch: pr.headRefName, sameRepo: pr.sameRepo, mine: pr.worker === this.identity?.id }));
   }
 
   async fetchSubmission(sub) {
@@ -274,14 +284,14 @@ export class GitHubBoard {
       '```',
       '</details>',
     ].join('\n');
-    await this.gh(['pr', 'comment', String(sub.id), '-R', this.repo, '--body', body]);
+    await this.api('POST', `${this.repoPath}/issues/${sub.id}/comments`, { body });
     return { where: sub.url };
   }
 
   async reviews(sub) {
-    const out = await this.gh(['pr', 'view', String(sub.id), '-R', this.repo, '--json', 'comments']);
+    const comments = await this.api('GET', `${this.repoPath}/issues/${sub.id}/comments?per_page=100`);
     const docs = [];
-    for (const c of JSON.parse(out).comments || []) {
+    for (const c of comments) {
       if (!c.body?.includes(REVIEW_MARK)) continue;
       const m = /```json\n([\s\S]*?)\n```/.exec(c.body);
       try {
@@ -295,11 +305,10 @@ export class GitHubBoard {
 
   async merge(sub) {
     // A merge commit keeps the work commit (and so the receipt's tree hash) in history.
-    await this.gh(['pr', 'merge', String(sub.id), '-R', this.repo, '--merge']);
+    await this.api('PUT', `${this.repoPath}/pulls/${sub.id}/merge`, { merge_method: 'merge' });
     // Leave no branch behind when the submission was pushed to this repository rather than a fork.
-    const pr = JSON.parse(await this.gh(['pr', 'view', String(sub.id), '-R', this.repo, '--json', 'headRefName,isCrossRepository']));
-    if (!pr.isCrossRepository && pr.headRefName.startsWith('swarm/')) {
-      await run('gh', ['api', '-X', 'DELETE', `repos/${this.repo}/git/refs/heads/${pr.headRefName}`]);
+    if (sub.sameRepo && sub.branch?.startsWith('swarm/')) {
+      await run('gh', ['api', '-X', 'DELETE', `${this.repoPath}/git/refs/heads/${sub.branch}`]);
     }
     return { where: sub.url };
   }
@@ -329,10 +338,11 @@ export class GitHubBoard {
             '',
             'Claims and releases appear below as signed comments. A pull request is opened only after verification passes on the worker\'s machine.',
           ].join('\n');
-          const url = (await this.gh(['issue', 'create', '-R', this.repo, '--title', `[swarm] ${task.ref}: ${task.title}`, '--body', body])).trim().split('\n').pop();
-          result.opened.push({ ref: task.ref, url });
+          const created = await this.api('POST', `${this.repoPath}/issues`, { title: `[swarm] ${task.ref}: ${task.title}`, body });
+          result.opened.push({ ref: task.ref, url: created.html_url });
         } else if (issue && finished) {
-          await this.gh(['issue', 'close', String(issue.number), '-R', this.repo, '--comment', 'Done: a verified submission for this task was merged.']);
+          await this.api('POST', `${this.repoPath}/issues/${issue.number}/comments`, { body: 'Done: a verified submission for this task was merged.' });
+          await this.api('PATCH', `${this.repoPath}/issues/${issue.number}`, { state: 'closed' });
           result.closed.push({ ref: task.ref, url: issue.url });
         }
       }

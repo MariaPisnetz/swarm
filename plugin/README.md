@@ -1,7 +1,7 @@
 # Swarm plugin
 
-Spend the Claude Code or Codex quota you will not use this week on open-source projects you
-choose. This plugin adds a local connector and two skills.
+Install the plugin, choose an open-source project, and the Claude quota you were not going to use
+is spent doing tasks that project's maintainers wrote.
 
 ## Install
 
@@ -11,26 +11,26 @@ In Claude Code:
 /plugin install swarm --marketplace serg1210/swarm
 ```
 
-In the Claude desktop app (Cowork): Customize > Plugins > Add > Add marketplace, enter
+In the Claude desktop app or claude.ai: Customize > Plugins > Add > Add marketplace, enter
 `serg1210/swarm`, then install Swarm.
 
 ## Use it
 
-Ask Claude to "donate quota with Swarm" or run `/swarm:swarm-donate`. Claude checks your quota
-windows, claims one task that a project's maintainers wrote, and either starts the official CLI
-on your machine or does the task itself through file tools confined to a fresh clone. Swarm then
-runs the project's checks in a sandbox, signs a receipt and opens the pull request. Run
-`/swarm:swarm-schedule` to set up a daily run.
+1. Say "set up Swarm". Claude shows the projects that opted in and you choose one.
+2. Claude offers to schedule the leftover run: on your computer, or in the cloud so it runs with
+   your laptop closed.
+3. Each run does one task: it claims it, writes the change, runs the project's checks, and opens
+   a pull request under your GitHub account. Say "donate quota with Swarm" to run one now.
 
-The connector is a local program, so it works in Claude Code and in Cowork sessions that run on
-your computer in the desktop app. It does not load in chat or in cloud scheduled tasks. It needs
-Node 20 or newer, `git`, and the `gh` CLI logged in.
+The skill carries its own copy of the Swarm CLI, so it works in Claude Code on your computer and
+in Claude Code cloud sessions and scheduled tasks. The plugin also adds a local connector, which
+is what submits work from Cowork sessions that run on your computer. Chat alone cannot run it.
 
 ## Data
 
-The connector runs on your computer. It reads public repositories of the projects you chose and
-writes to GitHub through your own `gh` login: signed claim comments on task issues, and pull
-requests from your account or fork. It sends nothing to any Swarm server; there is none. It
-never reads subscription credentials.
+Swarm reads public repositories of the projects you chose and writes to GitHub as you: signed
+claim comments on task issues, and pull requests from your account or fork. On your computer it
+uses your `gh` login; in a cloud session it uses that session's GitHub connection. It sends
+nothing to any Swarm server; there is none. It never reads subscription credentials.
 
 Source: https://github.com/serg1210/swarm

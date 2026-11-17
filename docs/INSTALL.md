@@ -1,54 +1,69 @@
-# Install Swarm in your agent
+# Install Swarm
 
-Swarm runs three ways. Pick the one that matches the agent you already use.
+Swarm is three steps: install the plugin, choose a project, and your leftover quota does tasks
+that project's maintainers wrote. This page covers each place it can run.
 
-| | What you install | Who edits the code | Tested by the maintainers |
+| Where | Who writes the change | Knows your quota | Tested by the maintainers |
 |---|---|---|---|
-| **Plain CLI** | `npx github:serg1210/swarm run` | The official Claude Code or Codex CLI, started by Swarm with no shell and no network | Yes, with Claude Code |
-| **Connector, delegate mode** | The Swarm connector in your agent | Same as above; your agent only starts the run and reports back | Yes, in Claude Code |
-| **Connector, connector mode** | The Swarm connector in your agent | Your agent itself, through file tools that reach only the task's clone | Yes, in Claude Code; not yet in Cowork, Codex or Hermes |
+| Claude Code on your computer | The official CLI, started by Swarm with no shell and no network | Yes, keeps a 20% reserve | Yes |
+| Claude Code cloud session or cloud scheduled task | The session's own agent, in its VM | No; scheduled before the weekly reset | On a local stand-in only |
+| Cowork on your computer | The official CLI if installed, else Cowork's agent through the connector | Only with the CLI installed | No |
+| Codex or Hermes | That agent, through the connector | No | No |
 
-In every mode Swarm does the claim, the path-policy check, the sandboxed verification, the signed
-receipt and the pull request, on your machine, under your own GitHub login.
+Wherever it runs, Swarm does the claim, the path-policy check, the project's verify steps, the
+signed receipt and the pull request, under your own GitHub identity.
 
-The connector is a local program (`swarm mcp`, MCP over stdio). It needs Node 20 or newer, `git`,
-and the [`gh`](https://cli.github.com) CLI logged in. It cannot run in a cloud session, because it
-needs your machine's git, GitHub login and sandbox.
-
-## Claude Code
+## Claude Code on your computer
 
 ```
-/plugin marketplace add serg1210/swarm
+/plugin install swarm --marketplace serg1210/swarm
 ```
 
-```
-/plugin install swarm@swarm-at-home
-```
+Then say "set up Swarm". Claude shows the projects that opted in, saves your choice, and offers
+to schedule a daily local run. "Donate quota with Swarm" runs one task now.
 
-Then ask Claude to "donate quota with Swarm", or run `/swarm:swarm-donate`.
+Needs Node 20 or newer, `git`, and the [`gh`](https://cli.github.com) CLI logged in.
 
-Without the plugin, add just the connector:
+## Claude Code in the cloud
 
-```bash
-claude mcp add swarm -- npx -y github:serg1210/swarm mcp
-```
+Cloud sessions and cloud scheduled tasks run in a VM that Anthropic manages, with Node, git and
+`gh` installed, and they draw on the same plan as everything else you do. That makes them the
+way to spend leftover quota with your laptop closed.
 
-## Claude desktop app (Cowork)
+1. Install the plugin on your account: claude.ai > Customize > Plugins > Add > Add marketplace >
+   `serg1210/swarm`. Its skill then loads in cloud sessions, and carries the Swarm CLI with it.
+2. Create a cloud scheduled task (`/schedule` in a local Claude Code session, or
+   claude.ai/code/routines):
+   - **Repository:** the project's repository if you can push to it. Otherwise your fork of it
+     and the project's repository, with the environment variable `SWARM_FORK=you/fork`.
+   - **Schedule:** weekly, six to twelve hours before your weekly window resets (see
+     claude.ai/settings/usage). A cloud session cannot read your quota, so timing is what makes
+     it leftover. If the limit is already reached, the run is simply rejected.
+   - **Prompt:** `Run the swarm skill for the project owner/repo#project and do at most one
+     task. Report the pull request link, or in one line why nothing was submitted.`
+3. Optional: set `SWARM_HANDLE` to your GitHub login, and `SWARM_IDENTITY` to the output of
+   `swarm identity export` on your computer, so every run signs as the same worker.
 
-1. Open **Customize > Plugins > Add > Add marketplace** and enter `serg1210/swarm`.
-2. Install **Swarm**. Its connector is marked "Runs in each session": it is a program on your
-   computer.
-3. Start a Cowork session that runs on your computer and ask Claude to "donate quota with Swarm".
+What is different in the cloud, and what is not yet proven:
 
-The connector does not load in chat, or in Cowork sessions and scheduled tasks that run in the
-cloud. Not yet tested by the maintainers in the desktop app; the same plugin is tested in Claude
-Code.
+- GitHub is reached through the session's connection, only for repositories attached to the
+  task, and only through GitHub's REST API. Swarm uses nothing else.
+- The project's checks run in the session's VM. It is disposable and holds no credentials, so it
+  stands in for the sandbox; its network follows the cloud environment's settings instead of
+  being off. Receipts record this as `cloud-vm`.
+- **Not yet run in a real cloud session.** The same path (skill, bundled CLI, an agent doing the
+  task, REST) is tested on a laptop standing in for one. Pushing through the cloud GitHub
+  connection, and submitting from a fork there, have not been exercised.
 
-### Daily run
+## Cowork in the Claude desktop app
 
-Ask Claude to run `/swarm:swarm-schedule`, or say "schedule Swarm daily". It sets up a **local**
-scheduled task that runs the `swarm-donate` skill once a day. Local tasks run only while the app is
-open and the computer is awake. A cloud scheduled task cannot reach the connector.
+1. **Customize > Plugins > Add > Add marketplace**, enter `serg1210/swarm`, install **Swarm**.
+2. Start a Cowork task that runs on your computer and say "set up Swarm".
+
+A Cowork task's own shell can clone from GitHub but cannot push, so here the plugin's connector
+does the claiming and submitting. The connector is a program on your computer (marked "Runs in
+each session"), which is why this needs a session that runs on your computer. For runs with the
+computer off, use a Claude Code cloud scheduled task as above. Not yet tested by the maintainers.
 
 ## Codex
 
@@ -72,16 +87,16 @@ args = ["mcp"]
 tool_timeout_sec = 900
 ```
 
-Add the skill:
+Add the skill (the instructions only; with `swarm` installed globally, read `SWARM` in it as the `swarm` command):
 
 ```bash
-mkdir -p ~/.codex/skills/swarm-donate && curl -fsSL https://raw.githubusercontent.com/serg1210/swarm/main/plugin/skills/swarm-donate/SKILL.md -o ~/.codex/skills/swarm-donate/SKILL.md
+mkdir -p ~/.codex/skills/swarm && curl -fsSL https://raw.githubusercontent.com/serg1210/swarm/main/plugin/skills/swarm/SKILL.md -o ~/.codex/skills/swarm/SKILL.md
 ```
 
 Daily run, from your own crontab (`crontab -e`):
 
 ```
-0 18 * * * codex exec "Run the swarm-donate skill. Do at most one task."
+0 18 * * * codex exec "Run the swarm skill. Do at most one task."
 ```
 
 Two things to know. OpenAI's documentation recommends API keys rather than a ChatGPT login for
@@ -113,13 +128,13 @@ hermes mcp test swarm
 Add the skill:
 
 ```bash
-mkdir -p ~/.hermes/skills/swarm-donate && curl -fsSL https://raw.githubusercontent.com/serg1210/swarm/main/plugin/skills/swarm-donate/SKILL.md -o ~/.hermes/skills/swarm-donate/SKILL.md
+mkdir -p ~/.hermes/skills/swarm && curl -fsSL https://raw.githubusercontent.com/serg1210/swarm/main/plugin/skills/swarm/SKILL.md -o ~/.hermes/skills/swarm/SKILL.md
 ```
 
 Daily run:
 
 ```bash
-hermes cron create "every day at 6pm" "Run the swarm-donate skill. Do at most one task." --skill swarm-donate --name swarm-daily-donation
+hermes cron create "every day at 6pm" "Run the swarm skill. Do at most one task." --skill swarm --name swarm-leftover
 ```
 
 Hermes runs scheduled agent jobs inside its gateway, so the gateway has to be running
@@ -141,22 +156,19 @@ Run the CLI from your own timer. This line does nothing unless your weekly windo
 17 * * * * npx -y github:serg1210/swarm run --only-if-expiring 12
 ```
 
-## What the connector can and cannot do
+## Three ways Swarm gets the change written
 
-- **Delegate mode** (`swarm_donate`, `swarm_review`) starts `swarm run` in the background and
-  returns a job id; the host polls `swarm_job`. The agent that edits code is the official CLI in
-  restricted mode, exactly as with the plain CLI. This is the cheapest mode and it reads your
-  quota windows first.
-- **Connector mode** (`swarm_begin`, the file tools, `swarm_finish`) is for hosts with no agent CLI
-  on the machine. The host's own model does the task. The file tools refuse absolute paths, `..`,
-  `.git`, symlinks that leave the clone, protected files and anything outside the task's allowed
-  paths. Swarm cannot see the host's quota in this mode, so it cannot keep a reserve for you; the
-  host's schedule and "one task per run" are the limit. The receipt records the host and model as
-  self-reported.
-- **Cost in connector mode depends on your host.** Every request carries everything else your host
-  has loaded. In our test the same task cost $0.13 API-equivalent from a host with only the Swarm
-  connector, and hit a $2.50 cap after five turns from a host with about 70 other connectors
-  loaded. Use delegate mode when you can.
-- **The connector does not confine your host.** If your host also has a shell, nothing in Swarm
-  stops it from using it. The skill tells it not to, the change is still policy-checked and
-  verified in the sandbox, and only maintainer-merged task files are ever shown to it.
+- **It starts the official CLI** (`swarm run`, or `swarm_donate` through the connector). The CLI
+  runs boxed in: no shell, no network, files only. This is the cheapest way and the only one
+  that reads your quota windows and keeps a reserve. Needs Claude Code or Codex on the machine.
+- **Your agent writes it through the connector** (`swarm_begin`, the file tools, `swarm_finish`).
+  For hosts with no agent CLI. The file tools refuse absolute paths, `..`, `.git`, symlinks that
+  leave the clone, protected files and anything outside the task's allowed paths.
+- **Your agent writes it over a shell** (`swarm task begin`, then `swarm task finish`). For cloud
+  sessions and any host with a shell and no connector. Swarm hands the agent a directory; nothing
+  confines the agent, and the policy check at the end rejects changes outside the task.
+
+In the last two, Swarm cannot see the host's quota, and the host and model in the receipt are
+self-reported. Cost also depends on what else the host has loaded: the same task cost $0.13
+API-equivalent from a host with only Swarm, and hit a $2.50 cap after five turns from a host with
+about 70 other connectors.

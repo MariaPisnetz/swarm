@@ -1,12 +1,17 @@
 {
   "name": "swarm-at-home",
-  "owner": { "name": "Swarm contributors", "url": "https://github.com/serg1210/swarm" },
-  "metadata": { "description": "Swarm: spare agent quota for open-source projects you choose." },
+  "owner": {
+    "name": "Swarm contributors",
+    "url": "https://github.com/serg1210/swarm"
+  },
+  "metadata": {
+    "description": "Swarm: spare agent quota for open-source projects you choose."
+  },
   "plugins": [
     {
       "name": "swarm",
       "source": "./plugin",
-      "description": "Spend spare Claude Code or Codex quota on open-source projects you choose, with sandboxed verification and signed receipts.",
+      "description": "Install, choose an open-source project, and your leftover Claude quota is spent doing tasks its maintainers wrote.",
       "category": "development"
     }
   ]

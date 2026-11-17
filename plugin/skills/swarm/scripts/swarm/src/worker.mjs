@@ -8,7 +8,8 @@ import { git, diffSummary, checkPolicy, runVerify, describeFailure } from './ver
 import { buildReceipt } from './receipt.mjs';
 import { makeWorkDir } from './repo.mjs';
 
-export function buildPrompt({ project, task, feedback, hints, mode = 'cli' }) {
+export function buildPrompt({ project, task, feedback, hints, mode = 'cli', workDir, session }) {
+  const cloud = process.env.CLAUDE_CODE_REMOTE === 'true';
   const steps = verifySteps(project, task);
   const lines = [
     'You are a volunteer coding agent contributing to an open-source project through Swarm.',
@@ -23,16 +24,20 @@ export function buildPrompt({ project, task, feedback, hints, mode = 'cli' }) {
     `- Never change: ${protectedGlobs(project).join(', ')}`,
     mode === 'connector'
       ? '- Read and change files only through the swarm_list, swarm_read, swarm_search, swarm_write, swarm_edit and swarm_delete tools. Do not run commands and do not use any other file or shell tool on this repository.'
-      : '- You cannot run commands. Read the code carefully instead of guessing.',
+      : mode === 'shell'
+        ? `- The repository is checked out at ${workDir}. Read and change files only inside that directory. Do not commit, push, switch branches or touch its .git directory: Swarm does that.${cloud ? ' You may run the verify steps yourself in that directory to check your work.' : " Do not run the project's code yourself: the finish step runs the checks in a sandbox."}`
+        : '- You cannot run commands. Read the code carefully instead of guessing.',
     '- When you finish, an automated verifier runs these steps in a sandbox with no network access:',
     ...steps.map((s) => `    - ${s.name}: ${s.run}`),
     '  If a step fails you get its output and one more attempt.',
     '- Keep the change small and focused on the task. Follow the style of the surrounding code.',
     '- Add or update tests when you change behaviour. Do not add dependencies unless the task says so.',
-    mode === 'connector' ? '- If the task cannot be done as written, call swarm_abandon and explain why.' : '- If the task cannot be done as written, change nothing and explain why.',
+    mode === 'connector' ? '- If the task cannot be done as written, call swarm_abandon and explain why.' : mode === 'shell' ? `- If the task cannot be done as written, run the Swarm CLI with: task abandon --session ${session} --reason "<why>".` : '- If the task cannot be done as written, change nothing and explain why.',
     mode === 'connector'
       ? '- When you are done, call swarm_finish with a short summary of what you changed and why. It becomes the pull request description. If it reports a failure, fix the problem and call it again.'
-      : '- End with a short summary of what you changed and why. It becomes the pull request description.',
+      : mode === 'shell'
+        ? `- When you are done, run the Swarm CLI with: task finish --session ${session} --summary "<what you changed and why>". The summary becomes the pull request description. If it reports a failure, fix the problem and run it again.`
+        : '- End with a short summary of what you changed and why. It becomes the pull request description.',
   ];
   const failures = Object.entries(hints?.failures || {});
   if (failures.length) {

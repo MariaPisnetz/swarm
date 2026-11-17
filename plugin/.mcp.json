@@ -2,7 +2,7 @@
   "mcpServers": {
     "swarm": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/server/cli/swarm.mjs", "mcp"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/skills/swarm/scripts/swarm/cli/swarm.mjs", "mcp"]
     }
   }
 }

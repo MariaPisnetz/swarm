@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SWARM_HOME, readJson, writeJson, run, which, log, step, ok, warn, fail, c, fmtUsd, fmtDuration } from './util.mjs';
-import { createIdentity, loadIdentity } from './identity.mjs';
+import { SWARM_HOME, readJson, writeJson, run, which, log, step, ok, warn, fail, c, fmtUsd, fmtDuration, setLogSink } from './util.mjs';
+import { createIdentity, loadIdentity, exportIdentity } from './identity.mjs';
 import { loadProjects, findTask, completedTasks } from './project.mjs';
 import { resolveRepo, syncMirror, loadProjectsAt } from './repo.mjs';
 import { pickSandbox, runSandboxed } from './sandbox.mjs';
@@ -25,11 +25,17 @@ ${c.bold('Volunteer')}
   swarm init [--handle <name>] [--repo <repo>]   create your local identity
   swarm doctor                                   check tools, login and sandbox
   swarm quota                                    show your current rate-limit windows
+  swarm projects                                 list projects that opted in to Swarm
   swarm choose <repo>[#project]                  pick a project to donate to (--remove to drop it)
   swarm tasks [--repo <repo>]                    list tasks and their state
   swarm run [--task <project/task>] [options]    work on a task and submit it
   swarm review [--task <project/task>]           independently verify someone else's submission
   swarm mcp                                      run as an MCP connector (Claude Code, Cowork, Codex, Hermes)
+
+${c.bold('For an agent that does the task itself')} (cloud sessions, any host with a shell; prints JSON)
+  swarm task begin [--task <project/task>] [--agent <name>]   claim a task, get a clone and instructions
+  swarm task finish --session <id> --summary <text>            verify, sign, open the pull request
+  swarm task abandon --session <id> [--reason <text>]          give the task back
 
 ${c.bold('Maintainer')}
   swarm verify [--project <id>] [--task <id>]    run a project's verify steps on the current checkout
@@ -73,6 +79,7 @@ export function parseArgs(argv) {
 
 /** A handle that is already public: the GitHub login when gh is logged in, else "anon". */
 export async function defaultHandle() {
+  if (/^[A-Za-z0-9-]{1,39}$/.test(process.env.SWARM_HANDLE || '')) return process.env.SWARM_HANDLE;
   const res = await run('gh', ['api', 'user', '-q', '.login']).catch(() => ({ code: 1, stdout: '' }));
   const login = res.code === 0 ? res.stdout.trim() : '';
   return /^[A-Za-z0-9-]{1,39}$/.test(login) ? login : 'anon';
@@ -178,8 +185,13 @@ const commands = {
     check(Number(process.versions.node.split('.')[0]) >= 20, `node ${process.versions.node}`, 'need 20 or newer');
     check(Boolean(await which('git')), 'git');
     const gh = await which('gh');
-    const auth = gh ? await run('gh', ['auth', 'status']) : { code: 1 };
-    check(gh && auth.code === 0, 'gh logged in', 'needed for GitHub-hosted projects');
+    if (process.env.CLAUDE_CODE_REMOTE === 'true') {
+      // A cloud session has no gh login of its own: its GitHub connection is injected outside the VM.
+      check(Boolean(gh), 'gh installed', "GitHub access comes from this cloud session's connection, for the repositories attached to it");
+    } else {
+      const auth = gh ? await run('gh', ['auth', 'status']) : { code: 1 };
+      check(gh && auth.code === 0, 'gh logged in', 'needed for GitHub-hosted projects');
+    }
     const found = await detectRunners();
     check(found.length > 0, `agent CLI: ${found.join(', ') || 'none'}`, 'claude or codex, logged in with your own plan');
     try {
@@ -192,8 +204,9 @@ const commands = {
     } catch (err) {
       check(false, 'sandbox', err.message);
     }
+    // Not a failure: a fresh machine or cloud VM gets its key on first use.
     const id = loadIdentity();
-    check(Boolean(id), id ? `identity ${id.id} (${id.handle})` : 'identity', id ? '' : 'run `swarm init`');
+    line(true, id ? `identity ${id.id} (${id.handle})` : 'identity: none yet', id ? '' : 'created automatically on the first run');
     if (problems) process.exitCode = 1;
   },
 
@@ -202,10 +215,52 @@ const commands = {
     step(`Asking ${runner.name} for your rate-limit windows (one tiny request)`);
     const rl = await runner.probeQuota();
     if (!rl) return warn(`${runner.name} does not report quota windows here.`);
+    if (args.json) return log(JSON.stringify({ ...rl, decision: quotaDecision(rl, { reserve: Number(args.reserve ?? 0.2) }) }, null, 2));
     log(describeWindow('5-hour window', rl.fiveHour));
     log(describeWindow('weekly window', rl.weekly));
     const d = quotaDecision(rl, { reserve: Number(args.reserve ?? 0.2) });
     log(d.go ? c.green('→ Room to donate.') : c.yellow(`→ Not donating now: ${d.reason}.`));
+  },
+
+  /** Projects that opted in, from the registry shipped with this release. */
+  async projects(args) {
+    const { projects } = readJson(path.join(path.dirname(fileURLToPath(import.meta.url)), 'registry.json'));
+    if (args.json) return log(JSON.stringify(projects, null, 2));
+    log(c.bold('Projects that opted in to Swarm') + c.dim('  (choose one with: swarm choose <repo>#<project>)\n'));
+    for (const p of projects) log(`  ${`${p.repo}#${p.project}`.padEnd(28)} ${p.name}: ${p.description}`);
+  },
+
+  /**
+   * The agent-does-it path over a shell, for cloud sessions and any host without the connector.
+   * stdout carries one JSON document; progress goes to stderr.
+   */
+  async task(args) {
+    setLogSink((line) => process.stderr.write(line + '\n'));
+    const out = (value, failed = false) => {
+      process.stdout.write(JSON.stringify(value, null, 2) + '\n');
+      if (failed) process.exitCode = 1;
+    };
+    const sessions = await import('./session.mjs');
+    const identity = loadIdentity() || createIdentity({ handle: await defaultHandle() });
+    const action = args._[0];
+    if (action === 'begin') {
+      return out(await sessions.beginSession({ identity, targets: targets(args, loadConfig()), taskRef: args.task, agent: args.agent, model: args.model, mode: 'shell' }));
+    }
+    if (action === 'status') return out({ unfinishedSession: sessions.activeSession()?.id || null });
+    if (!args.session) throw new Error('--session <id> is required (it is in the output of `swarm task begin`).');
+    if (action === 'finish') {
+      const res = await sessions.finishSession(args.session, { identity, summary: args.summary });
+      return out(res, !res?.ok);
+    }
+    if (action === 'abandon') return out(await sessions.abandonSession(args.session, { identity, reason: args.reason }));
+    throw new Error('Usage: swarm task begin | finish | abandon | status');
+  },
+
+  /** Print this worker's key so a cloud environment can sign as the same worker (SWARM_IDENTITY). */
+  async identity(args) {
+    const id = needIdentity();
+    if (args._[0] !== 'export') return log(`${id.id} (${id.handle})`);
+    log(exportIdentity(id));
   },
 
   async choose(args) {
