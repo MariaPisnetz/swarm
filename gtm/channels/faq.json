@@ -1,0 +1,9 @@
+{
+  "id": "faq",
+  "name": "Objections FAQ",
+  "purpose": "Straight answers to the questions a sceptical engineer asks first.",
+  "minWords": 250,
+  "maxWords": 900,
+  "requiredHeadings": [],
+  "minQuestions": 6
+}

@@ -1,0 +1,8 @@
+{
+  "id": "maintainer-pitch",
+  "name": "Maintainer one-pager",
+  "purpose": "Explains to an open-source maintainer what adopting Swarm involves and what protects their repository.",
+  "minWords": 200,
+  "maxWords": 500,
+  "requiredHeadings": ["What you get", "What protects your repository", "How to adopt"]
+}

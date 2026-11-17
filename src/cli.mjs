@@ -1,0 +1,405 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { SWARM_HOME, readJson, writeJson, run, which, log, step, ok, warn, fail, c, fmtUsd, fmtDuration } from './util.mjs';
+import { createIdentity, loadIdentity } from './identity.mjs';
+import { loadProjects, findTask, completedTasks } from './project.mjs';
+import { resolveRepo, syncMirror, loadProjectsAt } from './repo.mjs';
+import { pickSandbox, runSandboxed } from './sandbox.mjs';
+import { getRunner, detectRunners } from './runners/index.mjs';
+import { GitBoard } from './board/git.mjs';
+import { GitHubBoard } from './board/github.mjs';
+import { workOn, openTasks } from './worker.mjs';
+import { reviewSubmission, reverify, tallyReviews } from './review.mjs';
+import { checkSubmission, readLedger } from './receipt.mjs';
+import { git, runVerify, describeFailure } from './verify.mjs';
+import { leaderboard, renderLeaderboard } from './ledger.mjs';
+
+const PKG = readJson(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'));
+const BOOLEANS = new Set(['dry-run', 'json', 'force', 'unsafe-no-sandbox', 'help', 'include-mine', 'no-verify', 'all']);
+
+const HELP = `${c.bold('swarm')} ${PKG.version}: put spare Claude Code / Codex quota to work on verified open-source tasks
+
+${c.bold('Volunteer')}
+  swarm init [--handle <name>] [--repo <repo>]   create your local identity
+  swarm doctor                                   check tools, login and sandbox
+  swarm quota                                    show your current rate-limit windows
+  swarm tasks [--repo <repo>]                    list tasks and their state
+  swarm run [--task <project/task>] [options]    work on a task and submit it
+  swarm review [--task <project/task>]           independently verify someone else's submission
+
+${c.bold('Maintainer')}
+  swarm verify [--project <id>] [--task <id>]    run a project's verify steps on the current checkout
+  swarm merge <submission>                       re-verify, check review quorum, merge
+  swarm ledger [--json]                          leaderboard from merged receipts
+  swarm ci --base <sha>                          verification entry point for CI
+
+${c.bold('Options for run / review')}
+  --repo <owner/name | url | path>   project repository (default: ${PKG.swarm.defaultRepo})
+  --project <id>                     only tasks from this project
+  --runner <claude|codex|mock>       agent CLI to use (default: first one installed)
+  --model <name>                     model passed to the agent CLI
+  --max-tasks <n>                    stop after n tasks (default 1)
+  --budget-usd <n>                   API-equivalent spend cap per agent run (default 3)
+  --attempts <n>                     agent attempts per task, with verifier feedback (default 2)
+  --timeout-minutes <n>              wall-clock cap per agent run (default 30)
+  --reserve <0..1>                   share of your weekly quota never touched (default 0.2)
+  --only-if-expiring <hours>         run only if your weekly window resets within this many hours
+  --sandbox <auto|seatbelt|bwrap|docker>
+  --dry-run                          do everything locally, push nothing
+  --force                            skip the quota check
+`;
+
+export function parseArgs(argv) {
+  const out = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) {
+      out._.push(a);
+      continue;
+    }
+    const [key, inline] = a.slice(2).split(/=(.*)/s);
+    if (BOOLEANS.has(key)) out[key] = true;
+    else if (inline !== undefined) out[key] = inline;
+    else if (i + 1 < argv.length) out[key] = argv[++i];
+    else throw new Error(`--${key} needs a value`);
+  }
+  return out;
+}
+
+const configFile = () => path.join(SWARM_HOME, 'config.json');
+const loadConfig = () => readJson(configFile(), {});
+
+function needIdentity() {
+  const id = loadIdentity();
+  if (!id) throw new Error('No identity yet. Run `swarm init` first.');
+  return id;
+}
+
+async function context(args, { needsIdentity = true } = {}) {
+  const config = loadConfig();
+  const identity = needsIdentity ? needIdentity() : loadIdentity();
+  const repo = resolveRepo(args.repo || process.env.SWARM_REPO || config.repo || PKG.swarm.defaultRepo);
+  if (repo.kind === 'github' && !(await which('gh'))) throw new Error('GitHub repositories need the `gh` CLI (https://cli.github.com), logged in.');
+  step(`Syncing ${repo.github || repo.url}`);
+  const mirror = await syncMirror(repo);
+  if (!mirror.projects.length) throw new Error('This repository has no Swarm projects (.swarm/projects/*/project.json).');
+  const board = repo.kind === 'github' ? new GitHubBoard({ repo: repo.github, mirror, identity }) : new GitBoard({ mirror, identity });
+  return { config, identity, repo, mirror, board };
+}
+
+async function runOptions(args, config, project) {
+  const requested = args['unsafe-no-sandbox'] ? 'none' : args.sandbox || config.sandbox || 'auto';
+  return {
+    sandbox: await pickSandbox({ requested, project }),
+    model: args.model || config.model,
+    effort: args.effort,
+    budgetUsd: Number(args['budget-usd'] ?? config.budgetUsd ?? 3),
+    attempts: Number(args.attempts ?? 2),
+    timeoutMinutes: Number(args['timeout-minutes'] ?? 30),
+    dryRun: Boolean(args['dry-run']),
+  };
+}
+
+async function pickRunner(args, config) {
+  const name = args.runner || config.runner || (await detectRunners())[0];
+  if (!name) throw new Error('No agent CLI found. Install Claude Code (`claude`) or Codex (`codex`) and log in.');
+  return getRunner(name);
+}
+
+function describeWindow(label, w) {
+  if (!w) return `${label}: unknown`;
+  const used = w.utilization == null ? 'unknown' : `${Math.round(w.utilization * 100)}% used`;
+  const reset = w.resetsAt ? `, resets in ${fmtDuration(new Date(w.resetsAt) - Date.now())}` : '';
+  return `${label}: ${used}${reset}`;
+}
+
+/** Decide whether donating now would eat into quota the volunteer needs. */
+export function quotaDecision(rateLimit, { reserve = 0.2, onlyIfExpiringHours } = {}) {
+  if (!rateLimit) return { go: true, reason: 'quota windows unknown for this runner' };
+  if (rateLimit.status === 'rejected') return { go: false, reason: 'you are currently rate limited' };
+  const cap = 1 - reserve;
+  const { weekly, fiveHour } = rateLimit;
+  if (weekly?.utilization != null && weekly.utilization >= cap) return { go: false, reason: `weekly quota is ${Math.round(weekly.utilization * 100)}% used; your reserve starts at ${Math.round(cap * 100)}%` };
+  if (fiveHour?.utilization != null && fiveHour.utilization >= cap) return { go: false, reason: `5-hour window is ${Math.round(fiveHour.utilization * 100)}% used; your reserve starts at ${Math.round(cap * 100)}%` };
+  if (onlyIfExpiringHours != null) {
+    if (!weekly?.resetsAt) return { go: false, reason: 'weekly reset time unknown, and --only-if-expiring was set' };
+    const hours = (new Date(weekly.resetsAt) - Date.now()) / 3_600_000;
+    if (hours > onlyIfExpiringHours) return { go: false, reason: `weekly window resets in ${Math.round(hours)}h, more than ${onlyIfExpiringHours}h away` };
+  }
+  return { go: true, reason: 'within your limits' };
+}
+
+const commands = {
+  async init(args) {
+    const identity = createIdentity({ handle: args.handle || os.userInfo().username });
+    const config = { ...loadConfig() };
+    if (args.repo) config.repo = args.repo;
+    if (args.runner) config.runner = args.runner;
+    writeJson(configFile(), config);
+    ok(`Worker ${c.bold(identity.id)} (${identity.handle})`);
+    log(c.dim(`  Key stored in ${path.join(SWARM_HOME, 'identity.json')}. It signs your receipts and never leaves this machine.`));
+    log(`\nNext: ${c.bold('swarm doctor')}, then ${c.bold('swarm tasks')} and ${c.bold('swarm run')}.`);
+  },
+
+  async doctor() {
+    const line = (good, label, detail = '') => log(`${good ? c.green('✓') : c.red('✗')} ${label}${detail ? c.dim('  ' + detail) : ''}`);
+    let problems = 0;
+    const check = (good, label, detail) => {
+      if (!good) problems++;
+      line(good, label, detail);
+    };
+    check(Number(process.versions.node.split('.')[0]) >= 20, `node ${process.versions.node}`, 'need 20 or newer');
+    check(Boolean(await which('git')), 'git');
+    const gh = await which('gh');
+    const auth = gh ? await run('gh', ['auth', 'status']) : { code: 1 };
+    check(gh && auth.code === 0, 'gh logged in', 'needed for GitHub-hosted projects');
+    const found = await detectRunners();
+    check(found.length > 0, `agent CLI: ${found.join(', ') || 'none'}`, 'claude or codex, logged in with your own plan');
+    try {
+      const mode = await pickSandbox({});
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-doctor-'));
+      const probe = `echo ok > inside.txt && ! ls ${JSON.stringify(path.join(os.homedir(), '.ssh'))} >/dev/null 2>&1 && ! echo x > ${JSON.stringify(path.join(os.homedir(), '.swarm-escape-test'))} 2>/dev/null`;
+      const res = await runSandboxed(probe, { workDir: tmp, mode, timeoutMs: 20_000 });
+      fs.rmSync(tmp, { recursive: true, force: true });
+      check(res.code === 0, `sandbox: ${mode}`, res.code === 0 ? 'home directory hidden, writes confined' : 'self-test failed: the sandbox did not isolate');
+    } catch (err) {
+      check(false, 'sandbox', err.message);
+    }
+    const id = loadIdentity();
+    check(Boolean(id), id ? `identity ${id.id} (${id.handle})` : 'identity', id ? '' : 'run `swarm init`');
+    if (problems) process.exitCode = 1;
+  },
+
+  async quota(args) {
+    const runner = await pickRunner(args, loadConfig());
+    step(`Asking ${runner.name} for your rate-limit windows (one tiny request)`);
+    const rl = await runner.probeQuota();
+    if (!rl) return warn(`${runner.name} does not report quota windows here.`);
+    log(describeWindow('5-hour window', rl.fiveHour));
+    log(describeWindow('weekly window', rl.weekly));
+    const d = quotaDecision(rl, { reserve: Number(args.reserve ?? 0.2) });
+    log(d.go ? c.green('→ Room to donate.') : c.yellow(`→ Not donating now: ${d.reason}.`));
+  },
+
+  async tasks(args) {
+    const { mirror, board } = await context(args, { needsIdentity: false });
+    const claims = await board.claims(mirror.projects);
+    const rows = openTasks(mirror.projects, mirror.dir, claims, { projectId: args.project });
+    if (args.json) return log(JSON.stringify(rows.map((r) => ({ ref: r.task.ref, title: r.task.title, size: r.task.size, state: r.state })), null, 2));
+    for (const project of mirror.projects) {
+      if (args.project && project.id !== args.project) continue;
+      log(`\n${c.bold(project.name || project.id)} ${c.dim(`(${project.id})`)}  ${project.description || ''}`);
+      for (const r of rows.filter((x) => x.project.id === project.id)) {
+        const tag = { open: c.green('open   '), claimed: c.yellow('claimed'), done: c.dim('done   ') }[r.state] || c.dim(r.state.padEnd(7));
+        log(`  ${tag} ${r.task.ref.padEnd(34)} ${c.dim(`[${r.task.size}]`)} ${r.task.title}`);
+      }
+    }
+    log();
+  },
+
+  async run(args) {
+    const ctx = await context(args);
+    const runner = await pickRunner(args, ctx.config);
+    const reserve = Number(args.reserve ?? ctx.config.reserve ?? 0.2);
+    const onlyIfExpiringHours = args['only-if-expiring'] != null ? Number(args['only-if-expiring']) : undefined;
+    const guard = (rl) => quotaDecision(rl, { reserve, onlyIfExpiringHours });
+
+    if (!args.force && runner.name !== 'mock') {
+      step('Checking your quota');
+      const rl = await runner.probeQuota();
+      if (rl) log(c.dim(`  ${describeWindow('5-hour', rl.fiveHour)}; ${describeWindow('weekly', rl.weekly)}`));
+      const d = guard(rl);
+      if (!d.go) return warn(`Not donating now: ${d.reason}. Use --force to override.`);
+    }
+
+    const maxTasks = Number(args['max-tasks'] ?? 1);
+    const total = { submitted: 0, failed: 0, costUsd: 0 };
+    for (let n = 0; n < maxTasks; n++) {
+      const claims = await ctx.board.claims(ctx.mirror.projects);
+      const candidates = openTasks(ctx.mirror.projects, ctx.mirror.dir, claims, { projectId: args.project, taskRef: args.task }).filter((r) => r.state === 'open');
+      if (!candidates.length) {
+        warn(args.task ? `Task ${args.task} is not open.` : 'No open tasks right now.');
+        break;
+      }
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      const opts = await runOptions(args, ctx.config, pick.project);
+      const res = await workOn({ ...ctx, runner, project: pick.project, task: pick.task, opts });
+      total.costUsd += res.usage?.costUsd || 0;
+      if (res.status === 'submitted' || res.status === 'dry-run') total.submitted++;
+      else if (res.status === 'failed') total.failed++;
+      if (args.task) break;
+      if (!args.force && res.rateLimit) {
+        const d = guard(res.rateLimit);
+        if (!d.go) {
+          warn(`Stopping: ${d.reason}.`);
+          break;
+        }
+      }
+    }
+    log(`\n${c.bold('Session')}: ${total.submitted} submitted, ${total.failed} failed, ${fmtUsd(total.costUsd)} API-equivalent quota used.`);
+  },
+
+  async review(args) {
+    const ctx = await context(args);
+    const runner = await pickRunner(args, ctx.config);
+    let subs = await ctx.board.submissions();
+    if (!args['include-mine']) subs = subs.filter((s) => !s.mine);
+    if (args.task) subs = subs.filter((s) => s.taskRef === args.task || String(s.id) === String(args.task));
+    const todo = [];
+    for (const s of subs) {
+      const mine = (await ctx.board.reviews(s)).some((r) => r.signer?.id === ctx.identity.id && r.work);
+      if (!mine || args.force) todo.push(s);
+    }
+    if (!todo.length) return warn('Nothing to review.');
+    const max = Number(args['max-tasks'] ?? 1);
+    for (const sub of todo.slice(0, max)) {
+      const project = ctx.mirror.projects.find((p) => p.id === sub.taskRef.split('/')[0]);
+      const opts = await runOptions(args, ctx.config, project);
+      await reviewSubmission({ ...ctx, runner, sub, opts });
+    }
+  },
+
+  async merge(args) {
+    const id = args._[0];
+    if (!id) throw new Error('Usage: swarm merge <submission id>   (see `swarm review` or the PR number)');
+    const ctx = await context(args);
+    const sub = (await ctx.board.submissions()).find((s) => String(s.id) === String(id) || s.taskRef === id);
+    if (!sub) throw new Error(`No open submission "${id}".`);
+    const head = await ctx.board.fetchSubmission(sub);
+    const project = ctx.mirror.projects.find((p) => p.id === sub.taskRef.split('/')[0]);
+    const opts = await runOptions(args, ctx.config, project);
+    step(`Re-verifying ${sub.taskRef} (${sub.id}) in ${opts.sandbox} sandbox`);
+    const r = await reverify({ repo: ctx.repo, mirror: ctx.mirror, head, sandbox: opts.sandbox });
+    if (r.workDir) fs.rmSync(r.workDir, { recursive: true, force: true });
+    if (!r.ok) throw new Error(`Submission is not valid:\n${r.problems.map((p) => `- ${p}`).join('\n')}`);
+    if (!r.verify.ok) throw new Error(`Verification failed:\n${describeFailure(r.verify)}`);
+    const tally = tallyReviews(await ctx.board.reviews(sub), r.receipt);
+    log(c.dim(`  reviews: ${tally.approvals} approve, ${tally.rejections} reject; quorum ${r.project.review.quorum}`));
+    if (tally.rejections && !args.force) throw new Error('A reviewer rejected this submission. Read the review, then use --force if you disagree.');
+    if (tally.approvals < r.project.review.quorum && !args.force) throw new Error(`Needs ${r.project.review.quorum} independent approval(s); has ${tally.approvals}. Ask a volunteer to run \`swarm review\`, or use --force.`);
+    const merged = await ctx.board.merge(sub);
+    ok(`Merged ${sub.taskRef} → ${merged.where}`);
+  },
+
+  async verify(args) {
+    const root = process.cwd();
+    const projects = loadProjects(root);
+    if (!projects.length) throw new Error('No .swarm/projects here.');
+    let failed = false;
+    for (const project of projects) {
+      if (args.project && project.id !== args.project) continue;
+      const task = args.task ? findTask([project], args.task)?.task : { verify: [] };
+      if (!task) continue;
+      const sandbox = await pickSandbox({ requested: args['unsafe-no-sandbox'] ? 'none' : args.sandbox || 'auto', project });
+      step(`${project.id}: verifying in ${sandbox} sandbox`);
+      const v = await runVerify(project, task, { workDir: root, sandbox, onStep: (s) => step(`  ${s.name}: ${c.dim(s.run)}`) });
+      if (v.ok) ok(`${project.id}: ${v.results.length} step(s) passed`);
+      else {
+        failed = true;
+        fail(`${project.id}: ${describeFailure(v)}`);
+      }
+    }
+    if (failed) process.exitCode = 1;
+  },
+
+  async ci(args) {
+    const cwd = path.resolve(args.cwd || '.');
+    if (!args.base) throw new Error('Usage: swarm ci --base <sha> [--cwd <checkout>] [--title <pr title>]');
+    const sandbox = await pickSandbox({ requested: args['unsafe-no-sandbox'] ? 'none' : args.sandbox || 'auto' });
+    const base = (await git(cwd, ['merge-base', args.base, 'HEAD'])).trim();
+    const projects = await loadProjectsAt(cwd, base);
+    const isSwarm = /^\[swarm\] /.test(args.title || '');
+    const commits = (await git(cwd, ['rev-list', `${base}..HEAD`])).split('\n').filter(Boolean);
+
+    if (isSwarm && commits.length === 1 && !(await git(cwd, ['diff', '--name-only', base, 'HEAD'])).trim()) {
+      return ok('Claim only (one empty commit). Nothing to verify yet.');
+    }
+    if (!isSwarm) {
+      // Ordinary pull request from a human: run every project's verify steps on the head.
+      step('Not a swarm submission: running project verify steps on the head commit');
+      for (const project of loadProjects(cwd)) {
+        const v = await runVerify(project, { verify: [] }, { workDir: cwd, sandbox, onStep: (s) => step(`  ${project.id} / ${s.name}`) });
+        if (!v.ok) {
+          fail(describeFailure(v));
+          process.exitCode = 1;
+          return;
+        }
+      }
+      return ok('Project verify steps passed');
+    }
+
+    const check = await checkSubmission(cwd, { base, head: 'HEAD', projects });
+    if (!check.ok) {
+      fail(`Submission rejected:\n${check.problems.map((p) => `  - ${p}`).join('\n')}`);
+      process.exitCode = 1;
+      return;
+    }
+    ok(`Structure, signature and policy OK: ${check.project.id}/${check.task.id} by worker ${check.receipt.signer.id}`);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-ci-'));
+    await git(cwd, ['worktree', 'add', '--quiet', '--detach', tmp, check.work]);
+    try {
+      const v = await runVerify(check.project, check.task, { workDir: tmp, sandbox, onStep: (s) => step(`  ${s.name}: ${c.dim(s.run)}`) });
+      if (!v.ok) {
+        fail(`Verification failed:\n${describeFailure(v)}`);
+        process.exitCode = 1;
+        return;
+      }
+      ok(`Verified from the base branch's rules: ${v.results.map((r) => r.name).join(', ')}`);
+    } finally {
+      await run('git', ['worktree', 'remove', '--force', tmp], { cwd });
+    }
+  },
+
+  async ledger(args) {
+    const root = args.cwd ? path.resolve(args.cwd) : fs.existsSync(path.join(process.cwd(), '.swarm')) && !args.repo ? process.cwd() : (await context(args, { needsIdentity: false })).mirror.dir;
+    const board = leaderboard(readLedger(root));
+    if (args.out) {
+      writeJson(path.resolve(args.out), board);
+      return ok(`Wrote ${args.out}`);
+    }
+    log(args.json ? JSON.stringify(board, null, 2) : renderLeaderboard(board));
+  },
+
+  /** Static data for the project page: projects, task states and the ledger, from a checkout. */
+  async 'site-data'(args) {
+    const root = path.resolve(args.cwd || '.');
+    const projects = loadProjects(root).map((p) => {
+      const done = completedTasks(root, p.id);
+      return {
+        id: p.id,
+        name: p.name || p.id,
+        description: p.description || '',
+        tasks: p.tasks.map((t) => ({ ref: t.ref, title: t.title, size: t.size, state: done.has(t.id) ? 'done' : t.status === 'ready' ? 'open' : t.status })),
+      };
+    });
+    const data = { ...leaderboard(readLedger(root)), projects };
+    if (args.out) {
+      writeJson(path.resolve(args.out), data);
+      return ok(`Wrote ${args.out}`);
+    }
+    log(JSON.stringify(data, null, 2));
+  },
+
+  async help() {
+    log(HELP);
+  },
+
+  async version() {
+    log(PKG.version);
+  },
+};
+
+export async function main(argv) {
+  const args = parseArgs(argv);
+  const name = args.help ? 'help' : args._.shift() || 'help';
+  const cmd = commands[name];
+  if (!cmd) {
+    fail(`Unknown command "${name}".`);
+    log(HELP);
+    process.exitCode = 2;
+    return;
+  }
+  await cmd(args);
+}

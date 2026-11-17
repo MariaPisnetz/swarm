@@ -1,0 +1,14 @@
+{
+  "name": "GTM harness",
+  "description": "Go-to-market assets for Swarm, gated by machine-checkable verifiers.",
+  "paths": ["gtm/**"],
+  "protect": ["gtm/facts.json"],
+  "verify": [
+    { "name": "harness-tests", "run": "node --test gtm/test/*.test.mjs", "timeoutSec": 120 },
+    { "name": "asset-checks", "run": "node gtm/verify.mjs", "timeoutSec": 120 }
+  ],
+  "limits": { "maxFilesChanged": 12, "maxDiffLines": 800 },
+  "review": { "quorum": 1 },
+  "replication": 1,
+  "claimTtlMinutes": 60
+}

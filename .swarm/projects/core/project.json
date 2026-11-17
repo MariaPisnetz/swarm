@@ -1,0 +1,20 @@
+{
+  "name": "Swarm core",
+  "description": "The swarm CLI itself: worker loop, boards, runners, ledger.",
+  "paths": ["src/**", "bin/**", "test/**", "docs/**"],
+  "protect": [
+    "LICENSE",
+    "package.json",
+    "src/sandbox.mjs",
+    "src/verify.mjs",
+    "src/receipt.mjs",
+    "src/identity.mjs",
+    "src/runners/claude.mjs",
+    "src/runners/codex.mjs"
+  ],
+  "verify": [{ "name": "unit-tests", "run": "node --test test/*.test.mjs", "timeoutSec": 300 }],
+  "limits": { "maxFilesChanged": 20, "maxDiffLines": 1000 },
+  "review": { "quorum": 1 },
+  "replication": 1,
+  "claimTtlMinutes": 90
+}

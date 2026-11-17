@@ -1,0 +1,8 @@
+{
+  "id": "comparison",
+  "name": "Comparison page",
+  "purpose": "Fair comparison with a named alternative. States what the alternative does better as well as worse.",
+  "minWords": 200,
+  "maxWords": 700,
+  "requiredHeadings": ["Summary", "Where it is stronger", "Where Swarm is stronger"]
+}

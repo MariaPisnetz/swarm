@@ -1,0 +1,8 @@
+{
+  "id": "factsheet",
+  "name": "Launch fact sheet",
+  "purpose": "Verified facts, numbers and known limitations for a human to draw on when writing a launch post in their own words. Hacker News asks that posts and comments are written by people, so this harness never produces the post itself.",
+  "minWords": 150,
+  "maxWords": 600,
+  "requiredHeadings": ["What it is", "How verification works", "Known limitations"]
+}

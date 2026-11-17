@@ -1,0 +1,158 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
+import { globToRegExp, matchesAny, parseFrontmatter, canonicalJson } from '../src/util.mjs';
+import { signDoc, verifyDoc, fingerprint } from '../src/identity.mjs';
+import { checkPolicy } from '../src/verify.mjs';
+import { parseStream } from '../src/runners/claude.mjs';
+import { parseStream as parseCodex } from '../src/runners/codex.mjs';
+import { quotaDecision, parseArgs } from '../src/cli.mjs';
+import { parseVerdict, tallyReviews } from '../src/review.mjs';
+import { leaderboard } from '../src/ledger.mjs';
+import { resolveRepo } from '../src/repo.mjs';
+import { ALWAYS_PROTECTED } from '../src/project.mjs';
+
+function identity(handle = 'w') {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const pub = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  return { handle, publicKey: pub, privateKey: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'), id: fingerprint(pub) };
+}
+
+test('globs', () => {
+  assert.ok(globToRegExp('src/**').test('src/a/b.mjs'));
+  assert.ok(globToRegExp('src/*.mjs').test('src/a.mjs'));
+  assert.ok(!globToRegExp('src/*.mjs').test('src/a/b.mjs'));
+  assert.ok(globToRegExp('**/*.md').test('README.md'));
+  assert.ok(globToRegExp('**/*.md').test('docs/x/y.md'));
+  assert.ok(globToRegExp('docs/').test('docs/a/b.md'));
+  assert.ok(!globToRegExp('src/**').test('srcx/a'));
+  assert.ok(matchesAny('.github/workflows/ci.yml', ALWAYS_PROTECTED));
+  assert.ok(matchesAny('.swarm/projects/core/tasks/x.test.mjs', ALWAYS_PROTECTED));
+  assert.ok(!matchesAny('src/cli.mjs', ALWAYS_PROTECTED));
+});
+
+test('frontmatter', () => {
+  const { meta, body } = parseFrontmatter('---\nid: a-1\ntitle: Do the thing: now\npaths: ["src/**", "test/**"]\nsize: S\n---\n\nBody here.\n');
+  assert.equal(meta.id, 'a-1');
+  assert.equal(meta.title, 'Do the thing: now');
+  assert.deepEqual(meta.paths, ['src/**', 'test/**']);
+  assert.equal(body, 'Body here.');
+  assert.deepEqual(parseFrontmatter('no frontmatter').meta, {});
+});
+
+test('canonical JSON is key-order independent', () => {
+  assert.equal(canonicalJson({ b: 1, a: [{ d: 1, c: 2 }] }), canonicalJson({ a: [{ c: 2, d: 1 }], b: 1 }));
+});
+
+test('signatures: valid, tampered, wrong signer', () => {
+  const id = identity();
+  const doc = signDoc({ kind: 'receipt', task: 't', n: 1 }, id);
+  assert.ok(verifyDoc(doc).ok);
+  assert.equal(verifyDoc({ ...doc, n: 2 }).ok, false);
+  const other = identity();
+  assert.equal(verifyDoc({ ...doc, signer: { ...doc.signer, publicKey: other.publicKey } }).ok, false);
+  assert.equal(verifyDoc({ kind: 'receipt' }).ok, false);
+});
+
+test('policy: paths, protected files, symlinks, limits', () => {
+  const project = { protect: ['LICENSE'], limits: { maxFilesChanged: 2, maxDiffLines: 10 } };
+  const task = { paths: ['src/**'] };
+  const f = (file, extra = {}) => ({ file, added: 1, removed: 0, mode: '100644', ...extra });
+  const diff = (files) => ({ files, lines: files.reduce((n, x) => n + x.added + x.removed, 0) });
+  assert.deepEqual(checkPolicy(diff([f('src/a.mjs')]), project, task), []);
+  assert.match(checkPolicy(diff([]), project, task)[0], /empty/);
+  assert.match(checkPolicy(diff([f('README.md')]), project, task)[0], /outside the paths/);
+  assert.match(checkPolicy(diff([f('LICENSE')]), project, task)[0], /protected/);
+  assert.match(checkPolicy(diff([f('.github/workflows/x.yml')]), project, task)[0], /protected/);
+  assert.match(checkPolicy(diff([f('.swarm/receipts/p/t/forged.json')]), project, task)[0], /protected/);
+  assert.match(checkPolicy(diff([f('src/link', { mode: '120000' })]), project, task)[0], /symlink/);
+  assert.match(checkPolicy(diff([f('src/a'), f('src/b'), f('src/c')]), project, task)[0], /files changed/);
+  assert.match(checkPolicy(diff([f('src/a', { added: 50 })]), project, task)[0], /lines changed/);
+});
+
+test('claude stream parsing: usage, model, rate limits', () => {
+  const stream = [
+    JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-x', claude_code_version: '2.1.0' }),
+    'not json',
+    JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.1, resetsAt: 1794962400, status: 'allowed' }, seven_day: { utilization: 0.36, resetsAt: 1795291200, status: 'allowed' } } } }),
+    JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'Done.', total_cost_usd: 0.42, num_turns: 7, duration_ms: 9000, usage: { input_tokens: 10, cache_read_input_tokens: 90, output_tokens: 20 } }),
+  ].join('\n');
+  const r = parseStream(stream);
+  assert.equal(r.ok, true);
+  assert.equal(r.model, 'claude-x');
+  assert.equal(r.summary, 'Done.');
+  assert.deepEqual(r.usage, { inputTokens: 100, outputTokens: 20, costUsd: 0.42, turns: 7, durationMs: 9000 });
+  assert.equal(r.rateLimit.weekly.utilization, 0.36);
+  assert.equal(r.rateLimit.weekly.resetsAt, new Date(1795291200 * 1000).toISOString());
+  const bad = parseStream(JSON.stringify({ type: 'result', subtype: 'error_max_budget_usd', is_error: true }));
+  assert.equal(bad.ok, false);
+  assert.equal(parseStream('').ok, false);
+});
+
+test('codex stream parsing', () => {
+  const r = parseCodex([
+    JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'All done' } }),
+    JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 5, cached_input_tokens: 5, output_tokens: 3 } }),
+  ].join('\n'));
+  assert.equal(r.ok, true);
+  assert.equal(r.summary, 'All done');
+  assert.equal(r.usage.inputTokens, 10);
+  assert.equal(parseCodex(JSON.stringify({ type: 'turn.failed', error: { message: 'rate limited' } })).error, 'rate limited');
+});
+
+test('quota guard keeps a reserve and honours --only-if-expiring', () => {
+  const soon = new Date(Date.now() + 5 * 3_600_000).toISOString();
+  const later = new Date(Date.now() + 100 * 3_600_000).toISOString();
+  const rl = (weekly, five = 0.1, resetsAt = later) => ({ status: 'allowed', weekly: { utilization: weekly, resetsAt }, fiveHour: { utilization: five } });
+  assert.equal(quotaDecision(null).go, true);
+  assert.equal(quotaDecision(rl(0.3)).go, true);
+  assert.equal(quotaDecision(rl(0.85)).go, false);
+  assert.equal(quotaDecision(rl(0.85), { reserve: 0.1 }).go, true);
+  assert.equal(quotaDecision(rl(0.3, 0.95)).go, false);
+  assert.equal(quotaDecision({ status: 'rejected' }).go, false);
+  assert.equal(quotaDecision(rl(0.3), { onlyIfExpiringHours: 12 }).go, false);
+  assert.equal(quotaDecision(rl(0.3, 0.1, soon), { onlyIfExpiringHours: 12 }).go, true);
+  assert.equal(quotaDecision({ status: 'allowed', weekly: { utilization: null, resetsAt: null } }).go, true);
+});
+
+test('argument parsing', () => {
+  assert.deepEqual(parseArgs(['run', '--task', 'core/x', '--dry-run', '--budget-usd=2']), { _: ['run'], task: 'core/x', 'dry-run': true, 'budget-usd': '2' });
+  assert.throws(() => parseArgs(['--task']));
+});
+
+test('review verdict parsing takes the last verdict line', () => {
+  assert.equal(parseVerdict('Looks fine.\nVERDICT: APPROVE'), 'approve');
+  assert.equal(parseVerdict('VERDICT: APPROVE\nActually no.\nverdict: reject\n'), 'reject');
+  assert.equal(parseVerdict('I would say VERDICT: APPROVE maybe'), null);
+  assert.equal(parseVerdict(''), null);
+});
+
+test('review tally: distinct signers, not the submitter, exact work commit, latest wins', () => {
+  const submitter = identity('s');
+  const a = identity('a');
+  const b = identity('b');
+  const receipt = signDoc({ kind: 'receipt', work: 'abc' }, submitter);
+  const rv = (id, verdict, extra = {}) => signDoc({ kind: 'review', work: 'abc', verdict, ts: '2026-01-01', ...extra }, id);
+  assert.equal(tallyReviews([rv(a, 'approve'), rv(a, 'approve')], receipt).approvals, 1);
+  assert.equal(tallyReviews([rv(submitter, 'approve')], receipt).approvals, 0);
+  assert.equal(tallyReviews([rv(a, 'approve', { work: 'other' })], receipt).approvals, 0);
+  assert.equal(tallyReviews([{ ...rv(a, 'approve'), verdict: 'approve', notes: 'tampered' }], receipt).approvals, 0);
+  const t = tallyReviews([rv(a, 'approve'), rv(b, 'reject'), rv(a, 'reject', { ts: '2026-02-01' })], receipt);
+  assert.deepEqual([t.approvals, t.rejections], [0, 2]);
+});
+
+test('leaderboard counts only valid receipts', () => {
+  const r = (id, handle, cost, valid = true) => ({ kind: 'receipt', valid, project: 'p', task: 't', signer: { id, handle }, usage: { costUsd: cost }, agent: { runner: 'claude' }, linesChanged: 5, ts: '2026-01-01' });
+  const b = leaderboard([r('1', 'ann', 1.5), r('1', 'ann', 0.5), r('2', 'bob', 9), r('3', 'eve', 99, false)]);
+  assert.deepEqual(b.totals, { tasks: 3, workers: 2, costUsd: 11, invalidReceipts: 1 });
+  assert.equal(b.workers[0].handle, 'ann');
+  assert.equal(b.workers[0].tasks, 2);
+});
+
+test('repository specs', () => {
+  assert.deepEqual(resolveRepo('acme/tool'), { kind: 'github', url: 'https://github.com/acme/tool.git', slug: 'acme--tool', github: 'acme/tool' });
+  assert.equal(resolveRepo('https://github.com/acme/tool').github, 'acme/tool');
+  assert.equal(resolveRepo('git@github.com:acme/tool.git').github, 'acme/tool');
+  assert.equal(resolveRepo('https://gitlab.com/acme/tool.git').kind, 'git');
+  assert.throws(() => resolveRepo(''));
+});
